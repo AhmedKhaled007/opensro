@@ -144,6 +144,9 @@ func (rt *Runtime) HandleNpcAction(divisionID string, character *enterworld.Char
 			ack = append(ack, 0)
 		}
 		frames := []wire.Frame{{Opcode: wire.OpNpcInteractionAck, Payload: ack}}
+		// 7046 writes interaction state 5 for a shop over the warehouse's 6:
+		// one slot, so an open warehouse ends (526CE0 refuses 0x1834).
+		rt.endStorageInteraction(divisionID, character.Name)
 		if rt.Commerce != nil {
 			// 510250 sets the shop function state (5); trades check it.
 			rt.Selected.OpenFunction(divisionID, character.Name, gid)
@@ -156,8 +159,10 @@ func (rt *Runtime) HandleNpcAction(divisionID string, character *enterworld.Char
 		if rt.storageAuthority == nil {
 			return nil, "storage authority is not configured"
 		}
-		// The storage function state, which warehouse moves check.
+		// The storage function state, and the warehouse session the moves
+		// check (storage.go), which outlives later selections.
 		rt.Selected.OpenFunction(divisionID, character.Name, gid)
+		rt.openStorageSession(divisionID, character.Name, gid)
 		return []wire.Frame{{Opcode: wire.OpNpcInteractionAck, Payload: wire.EncodeNpcInteractionAck(mask)}}, ""
 	case simulation.NpcTalkFlagMagicOption:
 		// B338 lock 0x80000000 opens the avatar grant window beside the
