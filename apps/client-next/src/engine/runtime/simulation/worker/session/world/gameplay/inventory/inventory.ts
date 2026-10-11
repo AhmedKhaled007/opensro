@@ -550,7 +550,8 @@ bootstrap
 			companionRentals.reset();
 			gacha.reset();
 			exchange = emptyExchange();
-			stall = emptyStall();
+			// Keep naming identity when an empty phase is not published to the UI.
+			stall = emptyStall( stall.namingSequence );
 			mall.reset();
 			mallDelivery = null;
 			tooltipRefs.clear();
@@ -2061,7 +2062,7 @@ clear
 			alchemy.reset();
 			gacha.reset();
 			exchange = emptyExchange();
-			stall = emptyStall();
+			stall = emptyStall( stall.namingSequence );
 			magicOption.reset();
 			mall.reset();
 			mallDelivery = null;
