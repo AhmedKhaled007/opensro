@@ -23,6 +23,7 @@ import type { EntityEquipment, EntityState } from "@/engine/contracts/world";
 import type { Renderer } from "@/engine/contracts/runtime";
 import type { UiQuad, UiScene } from "@/engine/contracts/ui";
 import type { WorldCamera } from "@/engine/contracts/scene";
+import type { ViewerLight } from "@/engine/contracts/runtime";
 import {
 	parseViewerRequest,
 	viewerError,
@@ -33,8 +34,9 @@ import {
 	type ViewerStage
 } from "@/engine/foundation/ui/viewer-request";
 import {
-	refitCamera,
+	nextFraming,
 	viewerCamera,
+	type ViewerFitting,
 	type ViewerBounds,
 	type ViewerFill
 } from "@/engine/foundation/rendering/viewer-camera";
@@ -64,6 +66,17 @@ const MAX_PICTURE_SIDE = 1024;
 // Models face -z at the doll's yaw 0 (portrait.ts), so that is their front.
 const MODEL_FRONT: readonly [number, number] = [ 0, -1 ];
 const WHITE: readonly [number, number, number, number] = [ 1, 1, 1, 1 ];
+// The viewer's studio light (port-only, docs/VIEWER.md). Without a world the
+// environment falls back to a white ambient of 1 under a 0.6 diffuse, which
+// washes every model flat, and the retail light comes from the model's side.
+// A warm key from in front of the model and above, over a cooler, lower
+// fill, gives it its shading back. Models face -z (MODEL_FRONT); the
+// direction points toward the light.
+const VIEWER_LIGHT: ViewerLight = {
+	diffuse: [ 1.15, 1.08, 0.98 ],
+	ambient: [ 0.38, 0.4, 0.47 ],
+	direction: [ 0, 0.67, -0.74 ]
+};
 
 declare global {
 	interface Window {
@@ -291,8 +304,9 @@ export function createViewer( host: ViewerHost ) {
 	// The interactive view: the model's turn and the camera's zoom, whether
 	// they changed since the last picture, and the drag in progress.
 	let yaw = 0, zoom = 1, changed = false, dragX: number | null = null, shown = false;
-	// Whether the camera was refit to the first drawn picture (refitCamera).
-	let refitted = false;
+	// Whether the camera is still being fitted to the drawn pictures, and how
+	// far that fitting has gone (nextFraming).
+	let framing = true, fitting: ViewerFitting = { widened: 0, refits: 0 };
 	/*
 	================
 	fail
@@ -378,7 +392,8 @@ export function createViewer( host: ViewerHost ) {
 		host.canvas.height = viewport.height;
 		if ( box ) {
 			camera = viewerCamera( box, MODEL_FRONT, viewport.width / viewport.height );
-			refitted = false;
+			framing = true;
+			fitting = { widened: 0, refits: 0 };
 		}
 	}
 	if ( failure ) fail( failure );
@@ -412,6 +427,7 @@ export function createViewer( host: ViewerHost ) {
 		}, { passive: false } );
 	}
 	if ( !failure ) {
+		host.renderer.setViewerLight?.( VIEWER_LIGHT );
 		measure();
 		host.characters.receiveLifecycle( [ { kind: "spawn", entity } ] );
 	}
@@ -491,22 +507,27 @@ export function createViewer( host: ViewerHost ) {
 			changed = false;
 			reading = true;
 			host.renderer.readDoll!().then( still => {
-				// The first picture only measures: frame what was drawn, draw again.
-				const drawn = refitted ? null : opaqueBox( still.rgba, still.width, still.height );
-				refitted = true;
-				if ( drawn && camera ) {
-					camera = refitCamera(
+				// Until it is framed a picture only measures: nextFraming widens or
+				// refits the camera and the model draws again.
+				const drawn = framing ? opaqueBox( still.rgba, still.width, still.height ) : null;
+				const next = drawn && camera &&
+					nextFraming(
 						camera,
 						drawn,
 						still.width,
 						still.height,
-						request?.still ? STILL_FILL : VIEW_FILL
+						request?.still ? STILL_FILL : VIEW_FILL,
+						fitting
 					);
+				if ( next ) {
+					camera = next.camera;
+					fitting = next.fitting;
 					reading = false;
 					settled = SETTLE_FRAMES - 1;
 					host.wake();
 					return;
 				}
+				framing = false;
 				// A still is read once: it stays reading until the PNG settles it.
 				if ( request?.still ) return encodePng( still ).then( succeed );
 				reading = false;
