@@ -14,6 +14,7 @@ package alchemy
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"opensro.online/server/internal/game/item/inventory"
@@ -73,6 +74,66 @@ const (
 	ReinforceAstralFloor    = 4
 )
 
+// The magic option tags reinforcement reads (magicoption.txt, the option's
+// four-character tag as a big-endian word): MATTR_LUCK adds to the chance,
+// MATTR_ATHANASIA saves an item from destruction, MATTR_SOLID from a curse,
+// MATTR_ASTRAL keeps +4; each spends one charge. MagicTagAlchemyBonus
+// ("luca") is the avatar option 498E96 adds to every attempt.
+const (
+	MagicTagLuck         uint32 = 0x6c75636b
+	MagicTagImmortal     uint32 = 0x61746861
+	MagicTagSteady       uint32 = 0x736f6c69
+	MagicTagAstral       uint32 = 0x61737472
+	MagicTagAlchemyBonus uint32 = 0x6c756361
+)
+
+// equipmentFlagsBase is TID1 3 / TID2 1 packed, the equipment band that
+// category reads; an elixir parameter byte supplies the TID3.
+const equipmentFlagsBase = 0x2c
+
+/*
+================
+elixirClasses
+
+The item classes (TID3) an elixir admits: the non-zero bytes of its first
+and last parameters. Reinforce refuses any other item (0x09); the
+catalogue names the families from the same list.
+================
+*/
+func elixirClasses(recipe Reference) []uint16 {
+	var classes []uint16
+	for _, p := range []uint32{recipe.Params[0], recipe.Params[4]} {
+		for shift := uint(0); shift < 32; shift += 8 {
+			if class := uint16(p >> shift & 255); class != 0 {
+				classes = append(classes, class)
+			}
+		}
+	}
+	return classes
+}
+
+/*
+================
+elixirKinds
+
+The equipment families of an elixir's classes (elixirClasses), sorted.
+================
+*/
+func elixirKinds(recipe Reference) []string {
+	var kinds []string
+	seen := map[string]bool{}
+	for _, class := range elixirClasses(recipe) {
+		kind := category(equipmentFlagsBase | class<<7)
+		if kind == "" || seen[kind] {
+			continue
+		}
+		seen[kind] = true
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
 // reinforceMaxDegree bounds a powder's authored degree (item classes run
 // to degree 16 in the widest catalog).
 const reinforceMaxDegree = 16
@@ -93,6 +154,10 @@ type ReinforceTable struct {
 	Codename string
 	Degree   int
 	Chances  [reinforceChanceLevels]int
+	// Kinds are the equipment families an elixir accepts (weapon, shield,
+	// armor, accessory), from the classes its first and last parameters
+	// list; Reinforce refuses any other item with 0x09.
+	Kinds []string
 }
 
 /*
@@ -112,6 +177,7 @@ func (c *Catalog) ReinforceTables() (elixirs, powders []ReinforceTable) {
 		}
 		switch ref.Flags {
 		case wire.PackTypeFlags(3, 3, 10, 1):
+			table.Kinds = elixirKinds(ref)
 			elixirs = append(elixirs, table)
 		case wire.PackTypeFlags(3, 3, 10, 2):
 			// A powder's first parameter is its equipment degree; a value
@@ -323,15 +389,7 @@ func (c *Catalog) Reinforce(items []inventory.Item, slots []uint8, bonus int, ro
 	if item.Plus >= 250 {
 		return zero, Refusal(0x0f)
 	}
-	compatible := false
-	for _, p := range []uint32{recipe.Params[0], recipe.Params[4]} {
-		for shift := uint(0); shift < 32; shift += 8 {
-			if uint16(p>>shift&255) == item.TypeFlags>>7&15 {
-				compatible = true
-			}
-		}
-	}
-	if !compatible {
+	if !slices.Contains(elixirClasses(recipe), item.TypeFlags>>7&15) {
 		return zero, Refusal(9)
 	}
 	chance := probability(recipe, item.Plus)
@@ -344,7 +402,7 @@ func (c *Catalog) Reinforce(items []inventory.Item, slots []uint8, bonus int, ro
 			chance += probability(p, item.Plus)
 		}
 	}
-	if chance < ReinforceMaxChance && c.charge(item, 0x6c75636b) {
+	if chance < ReinforceMaxChance && c.charge(item, MagicTagLuck) {
 		chance += ReinforceLuckBonus
 	}
 	chance += bonus
@@ -369,17 +427,17 @@ func (c *Catalog) Reinforce(items []inventory.Item, slots []uint8, bonus int, ro
 			}
 			if n < ReinforceDestroyPercent {
 				result.Destroyed = item.TypeFlags&1 == 0
-				if result.Destroyed && c.charge(item, 0x61746861) {
+				if result.Destroyed && c.charge(item, MagicTagImmortal) {
 					result.Destroyed = false
 				}
-			} else if !c.charge(item, 0x736f6c69) {
+			} else if !c.charge(item, MagicTagSteady) {
 				if err = c.curse(item, roll); err != nil {
 					return zero, err
 				}
 			}
 		}
 		if !result.Destroyed {
-			if item.Plus >= ReinforceAstralFloor && c.charge(item, 0x61737472) {
+			if item.Plus >= ReinforceAstralFloor && c.charge(item, MagicTagAstral) {
 				item.Plus = ReinforceAstralFloor
 			} else {
 				item.Plus = 0
