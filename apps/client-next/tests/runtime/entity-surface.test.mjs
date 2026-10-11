@@ -182,3 +182,57 @@ test("spawn initialization selects a raised nav floor and excludes teleport prop
 	assert.equal( flush( e ), null );
 	e.dispose();
 });
+
+/*
+================
+a second spawn of a held gid replaces it
+
+CIGIDObject_RegisterGid (852CA0) only debug-asserts a gid it already holds
+and keeps the newer object, so the native client never drops the session on
+a duplicate 0x30D7. The port retires the old entity, then spawns the new.
+================
+*/
+test("a second spawn of a held gid replaces it instead of ending the session", () => {
+	const e = owner( createNavigation() );
+	e.receive( spawn( 30, 40 ), 0 );
+	flush( e );
+	assert.doesNotThrow( () => e.receive( spawn( 50, 60 ), 0 ) );
+	const order = defined( flush( e ) ).events
+		.filter( event => event.gid === 7 || event.entity?.gid === 7 )
+		.map( event => event.kind );
+	assert.deepEqual( order, [ "despawn", "spawn" ] );
+	assert.equal( defined( e.read( 7 ) ).x, 50 );
+	e.dispose();
+});
+
+/*
+================
+a duplicate spawn keeps the gid's gameplay state
+
+Native only overwrites the gid's slot, so gameplay's lifecycle hears no
+despawn: a selected target, a queued skill, an open NPC dialog and the HP
+record survive (gameplay.entityLifecycle clears them only on a despawn).
+================
+*/
+test("a duplicate spawn tells gameplay only spawns, so its target and dialog survive", () => {
+	const nav = createNavigation(), heard = [];
+	const e = createEntities(
+		( p, r, c ) => nav.surface( p, r, undefined, c ),
+		event => heard.push( event.kind ),
+		undefined,
+		nav.clip
+	);
+	e.bootstrap( {
+		protocolVersion: 2,
+		nativeResult: 1,
+		refObjSnapshot: [ { refObjId: 2029, kind: "npc", tidWord: 0 } ],
+		localPlayerEntry: { modelRef: 1933, startProfile: { regionId: 25000, x: 1, y: 2, z: 3, angle: 0 } }
+	} );
+	flush( e );
+	heard.length = 0;
+	e.receive( spawn( 30, 40 ), 0 );
+	e.receive( spawn( 50, 60 ), 0 );
+	flush( e );
+	assert.deepEqual( heard, [ "spawn", "spawn" ] );
+	e.dispose();
+});
