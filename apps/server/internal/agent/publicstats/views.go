@@ -446,14 +446,27 @@ func (s *Service) profile(req *http.Request) (any, error) {
 	}
 	for _, row := range c.MissionInventory {
 		if row.Slot >= 0 && row.Slot < equipmentSlots && row.RefObjID != 0 {
-			p.Look.Worn = append(p.Look.Worn, WornItem{Slot: row.Slot, RefItemID: row.RefObjID, Plus: row.Plus})
+			p.Look.Worn = append(p.Look.Worn, wornItem(row))
 		}
 	}
 	if c.AvatarInventory != nil {
 		for _, row := range c.AvatarInventory.Rows {
 			if row.RefObjID != 0 {
-				p.Look.Avatar = append(p.Look.Avatar, WornItem{Slot: row.Slot, RefItemID: row.RefObjID})
+				item := wornItem(row)
+				// An avatar socket has no plus or durability in the tooltip.
+				item.Plus, item.Durability = 0, nil
+				p.Look.Avatar = append(p.Look.Avatar, item)
 			}
+		}
+	}
+	if c.PublicGearHidden {
+		// The items stay (the 3D view draws them); their own stats do not.
+		p.GearHidden = true
+		for i := range p.Look.Worn {
+			p.Look.Worn[i].Variance, p.Look.Worn[i].Durability, p.Look.Worn[i].MagicOptions = "", nil, nil
+		}
+		for i := range p.Look.Avatar {
+			p.Look.Avatar[i].Variance, p.Look.Avatar[i].MagicOptions = "", nil
 		}
 	}
 	sort.Slice(p.Look.Worn, func(i, j int) bool { return p.Look.Worn[i].Slot < p.Look.Worn[j].Slot })
@@ -510,4 +523,24 @@ func boundedInt(text string, def, max int) (int, error) {
 		return 0, errBadRequest
 	}
 	return n, nil
+}
+
+/*
+================
+wornItem
+
+One worn row as the profile shows it: the socket, the reference, and what
+the item tooltip prints from the item itself.
+================
+*/
+func wornItem(row domain.InventoryRow) WornItem {
+	durability := row.Durability
+	item := WornItem{Slot: row.Slot, RefItemID: row.RefObjID, Plus: row.Plus, Durability: &durability}
+	if row.VarianceBits != "" && row.VarianceBits != "0" {
+		item.Variance = row.VarianceBits
+	}
+	for _, v := range row.MagicOptions {
+		item.MagicOptions = append(item.MagicOptions, strconv.FormatUint(v, 10))
+	}
+	return item
 }
