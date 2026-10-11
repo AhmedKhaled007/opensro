@@ -79,7 +79,7 @@ export function createUiBridge(
 	const controls = new Map<
 		string,
 		{
-			element: HTMLInputElement | HTMLButtonElement | HTMLDivElement;
+			element: HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement | HTMLDivElement;
 			value: UiControl;
 			order: number;
 			box: [number, number, number, number];
@@ -216,7 +216,7 @@ export function createUiBridge(
 	Publish browser-owned text and selection together, including IME state.
 	================
 	*/
-	function edit( element: HTMLInputElement, id: string ) {
+	function edit( element: HTMLInputElement | HTMLTextAreaElement, id: string ) {
 		emit( {
 			kind: "edit",
 			id,
@@ -265,10 +265,11 @@ export function createUiBridge(
 			if ( !event.repeat ) emit( { kind: "key", code: event.code, shift: event.shiftKey, ctrl: event.ctrlKey } );
 			return;
 		}
-		if ( !(event.target instanceof HTMLInputElement) && !event.repeat ) heldKey( event.code, true );
+		const editing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+		if ( !editing && !event.repeat ) heldKey( event.code, true );
 		if (
 			event.code !== "Escape" && event.code !== "Space" && event.key !== "Enter" &&
-			!(event.target instanceof HTMLInputElement) && !event.repeat
+			!editing && !event.repeat
 		) emit( { kind: "key", code: event.code, shift: event.shiftKey, ctrl: event.ctrlKey } );
 		if ( event.code === "Escape" && !event.repeat ) {
 			emit( { kind: "key", code: event.code, shift: event.shiftKey, ctrl: event.ctrlKey } );
@@ -312,17 +313,23 @@ export function createUiBridge(
 	root.addEventListener( "compositionend", event => {
 		composing = false;
 		imeEnter = null;
-		if ( event.target instanceof HTMLInputElement ) edit( event.target, event.target.dataset.uiId! );
+		if ( event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement ) {
+			edit( event.target, event.target.dataset.uiId! );
+		}
 	}, { signal: lifetime.signal } );
 	root.addEventListener( "input", event => {
 		// A committed (non-composing) edit proves no composition is open, so a
 		// compositionstart whose end was lost cannot block Enter for good.
 		if ( event instanceof InputEvent && !event.isComposing ) composing = false;
-		if ( event.target instanceof HTMLInputElement ) edit( event.target, event.target.dataset.uiId! );
+		if ( event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement ) {
+			edit( event.target, event.target.dataset.uiId! );
+		}
 	}, { signal: lifetime.signal } );
 	document.addEventListener( "selectionchange", () => {
 		const el = document.activeElement;
-		if ( el instanceof HTMLInputElement && root.contains( el ) ) edit( el, el.dataset.uiId! );
+		if ( (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && root.contains( el ) ) {
+			edit( el, el.dataset.uiId! );
+		}
 	}, { signal: lifetime.signal } );
 	/*
 	================
@@ -752,7 +759,7 @@ export function createUiBridge(
 			}
 			for ( const [order, control] of state.controls.entries() ) {
 				let slot = controls.get( control.id );
-				if ( slot && slot.value.kind !== control.kind ) {
+				if ( slot && (slot.value.kind !== control.kind || !!slot.value.multiline !== !!control.multiline) ) {
 					retire( control.id );
 					slot = undefined;
 				}
@@ -762,6 +769,8 @@ export function createUiBridge(
 						document.createElement( "div" ) :
 						control.kind === "button" ?
 						document.createElement( "button" ) :
+						control.multiline ?
+						document.createElement( "textarea" ) :
 						document.createElement( "input" );
 					element.dataset.uiId = control.id;
 					// Transparent browser editors preserve native IME candidate positioning and selection.
@@ -780,6 +789,12 @@ export function createUiBridge(
 						element.spellcheck = false;
 						element.setAttribute( "autocapitalize", "off" );
 						element.setAttribute( "autocorrect", "off" );
+					}
+					if ( element instanceof HTMLTextAreaElement ) {
+						element.style.whiteSpace = "pre-wrap";
+						element.style.resize = "none";
+						element.style.lineHeight = "16px";
+						element.spellcheck = false;
 					}
 					root.append( element );
 					slot = { element, value: control, order: NaN, box: [ NaN, NaN, NaN, NaN ] };
@@ -801,12 +816,12 @@ export function createUiBridge(
 					el.style.zIndex = String( order );
 					hitLayoutChanged = true;
 				}
-				if ( el instanceof HTMLInputElement ) {
+				if ( el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ) {
 					const limit = control.maxLength ?? (control.kind === "password" ? 1024 : 256);
 					if ( el.maxLength !== limit ) el.maxLength = limit;
 				}
 				// Match authored edit hit bounds while retaining its text client insets.
-				if ( el instanceof HTMLInputElement ) {
+				if ( el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ) {
 					const align = control.textAlign ?? "center", insets = control.textInsets ?? [ 0, 0, 0, 0 ];
 					if ( el.style.textAlign !== align ) el.style.textAlign = align;
 					for (
@@ -834,7 +849,7 @@ export function createUiBridge(
 				// A locked text edit is read-only, never disabled: the browser takes
 				// focus away from a disabled element and does not give it back, so a
 				// lock that lasted one network round trip left the edit unfocused.
-				const textEdit = el instanceof HTMLInputElement &&
+				const textEdit = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
 					(control.kind === "text" || control.kind === "password");
 				if ( textEdit ) {
 					if ( el.readOnly !== !!control.disabled ) el.readOnly = !!control.disabled;
@@ -854,13 +869,17 @@ export function createUiBridge(
 							el.setAttribute( "aria-pressed", selected );
 						}
 					} else if ( el.hasAttribute( "aria-pressed" ) ) el.removeAttribute( "aria-pressed" );
-				} else if ( el instanceof HTMLInputElement && el.value !== control.value && !composing ) {
+				} else if (
+					(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
+					el.value !== control.value && !composing
+				) {
 					el.value = control.value ?? "";
 				}
 				// The transparent editor's glyph metrics and hit box use the same
 				// physical-to-CSS conversion as the visible bitmap UI.
 				const fontSize = INPUT_FONT_PIXELS * scale + "px";
 				if ( el.style.fontSize !== fontSize ) el.style.fontSize = fontSize;
+				if ( el instanceof HTMLTextAreaElement ) el.style.lineHeight = 16 * scale + "px";
 				const [x, y, w, h] = control.rect,
 					left = box.left + x * scale,
 					top = box.top + y * scale,
@@ -892,7 +911,10 @@ export function createUiBridge(
 					return;
 				}
 				const slot = controls.get( request.id );
-				if ( slot && !slot.value.disabled && slot.element instanceof HTMLInputElement ) {
+				if (
+					slot && !slot.value.disabled &&
+					(slot.element instanceof HTMLInputElement || slot.element instanceof HTMLTextAreaElement)
+				) {
 					focusRevision = request.revision;
 					slot.element.focus( { preventScroll: true } );
 					slot.element.setSelectionRange( request.anchor ?? request.caret, request.caret );

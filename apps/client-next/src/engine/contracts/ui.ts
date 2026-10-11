@@ -135,6 +135,7 @@ UiControl
 ================
 */
 export interface UiControl {
+	readonly multiline?: boolean;
 	readonly valueText?: string;
 	readonly whisperTarget?: string;
 	readonly textAlign?: "left" | "center" | "right";

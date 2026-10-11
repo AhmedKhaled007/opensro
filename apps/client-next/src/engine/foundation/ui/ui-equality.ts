@@ -112,6 +112,7 @@ export function sameUiSemantics( a: UiSemantics, b: UiSemantics ): boolean {
 	) return false;
 	for ( let i = 0; i < a.controls.length; i++ ) {
 		const x = a.controls[i]!, y = b.controls[i]!;
+		if ( x.multiline !== y.multiline ) return false;
 		if (
 			x.id !== y.id || x.label !== y.label || x.kind !== y.kind || x.value !== y.value ||
 			x.disabled !== y.disabled || x.selected !== y.selected || x.captureKeys !== y.captureKeys ||
