@@ -37,6 +37,50 @@ export function missionLoadingAssets() {
 }
 /*
 ================
+LoadingArtState
+
+What the next loading screen can be: whether the session is in the world,
+whether the local player is dead (a rebirth teleport follows), whether a
+restart, exit or logout was asked for (character select or the title
+follows), and the europe variant the next plain load will draw.
+================
+*/
+export interface LoadingArtState {
+	readonly inWorld: boolean;
+	readonly dead: boolean;
+	readonly leaving: boolean;
+	readonly nextVariant: number;
+}
+
+/*
+================
+loadingArtDemand
+
+The loading art to keep decoded now: only what the next loading screen can
+show. Each 1024x768 background holds 3 MiB decoded, and keeping all of
+them warm cost 18 MiB for screens that cannot appear. The others stay in
+the persistent store and are decoded with seconds of lead: the rebirth
+prompt comes 3 s after death, and restart, exit and logout wait out the
+server's countdown (departure.ts). Art no lead time foresees (a destination
+region, loading_thief2 for travel mode 4, which no path sets today) is
+demanded on use: the screen shows its chrome and gauge at once and the
+background when decoded, as region art always has.
+================
+*/
+export function loadingArtDemand( state: LoadingArtState ): string[] {
+	const paths = [
+		"loading_form",
+		"gauge_loading",
+		"nowloading",
+		`loading_europe_${state.nextVariant === 2 ? 2 : 1}`
+	];
+	if ( state.inWorld && state.dead ) paths.push( "loading_rebirth" );
+	if ( !state.inWorld || state.leaving ) paths.push( "loading_charactercustom", "loading_charactercustom_europe" );
+	return paths.map( name => root + name + ".png" );
+}
+
+/*
+================
 missionLoadingQuads
 
 CPSMission 7292E0 supplies the authored 1600x1200 rectangles. Desktop keeps

@@ -499,7 +499,7 @@ import { academyLayout } from "@/engine/foundation/ui/academy-layout";
 import { createGuideResources } from "./guide/resources";
 import { automaticGuide } from "@/engine/foundation/gameplay/guide";
 import {
-	missionLoadingAssets,
+	loadingArtDemand,
 	missionLoadingQuads,
 	loadingScreenQuads,
 	regionLoadingBackground,
@@ -848,6 +848,25 @@ export function createUi(
 	let buffDismiss: { skillId: number; instance: number; } | null = null;
 	let loading: LoadingPresentation | null = null;
 	let loadingGeneration = 0, loadingTravelRevision: number | undefined;
+	// The europe variant the next plain load draws, chosen a load ahead so
+	// only that background is kept decoded (mission-loading.ts loadingArtDemand).
+	let nextLoadingVariant = loadingVariant();
+	// A restart, exit or logout was asked for: character select or the title
+	// follows after the server's countdown, so their loading art is warmed.
+	let leaveRequested = false;
+	/*
+	================
+	takeLoadingVariant
+
+	The variant this load shows; the next one is drawn now, from the same
+	distribution native draws at the load itself.
+	================
+	*/
+	const takeLoadingVariant = () => {
+		const variant = nextLoadingVariant;
+		nextLoadingVariant = loadingVariant();
+		return variant;
+	};
 	const levels = feedbackLevels();
 	const notificationBanner = createNoticeBanner( "notificationBanner" ),
 		uniqueBanner = createUniqueBanner(),
@@ -3732,6 +3751,7 @@ export function createUi(
 			pending = true;
 			commands( { kind: "enter-world", character: selectedCharacter } );
 		} else if ( id === "logout" || id === "disconnect-confirm" ) {
+			leaveRequested = true;
 			commands( { kind: "logout" } );
 			password = "";
 			roster = [];
@@ -3743,9 +3763,11 @@ export function createUi(
 		} else if ( id === "disconnect" ) commands( { kind: "disconnect" } );
 		else if ( id === "system-restart" ) {
 			setPanel( "" );
+			leaveRequested = true;
 			commands( { kind: "restart" } );
 		} else if ( id === "system-exit" ) {
 			setPanel( "" );
+			leaveRequested = true;
 			commands( { kind: "exit" } );
 		} else if ( closedPanel( id ) !== undefined || id === "companion-close" || id === "potion-cancel" ) {
 			confirmDrop = "";
@@ -8785,9 +8807,9 @@ export function createUi(
 				const background = loading?.key === key ?
 					loading.background :
 					next.travel ?
-					travelLoadingBackground( next.travel, loadingVariant() ) :
+					travelLoadingBackground( next.travel, takeLoadingVariant() ) :
 					(next.frontend?.phase === "loading-world" || next.worldTransitionRegion === undefined) ?
-					missionLoadingQuads( w, h, loadingVariant(), 0 )[1]!.texture :
+					missionLoadingQuads( w, h, takeLoadingVariant(), 0 )[1]!.texture :
 					regionLoadingBackground( next.worldTransitionRegion! );
 				request = {
 					key,
@@ -21643,7 +21665,13 @@ export function createUi(
 				controls
 			};
 			// A completion here must rebuild texture-dependent quads on the next step.
-			paths.push( ...missionLoadingAssets() );
+			if ( phase !== "world" ) leaveRequested = false;
+			paths.push( ...loadingArtDemand( {
+				inWorld: phase === "world",
+				dead: !!game?.vitals.find( v => v.gid === game.localGid )?.deathState,
+				leaving: leaveRequested,
+				nextVariant: nextLoadingVariant
+			} ) );
 			// Prewarm decoded authored artwork so hotkeys/sidebar changes stay immediate.
 			// Renderer now derives GPU residency from committed quads; this catalogue
 			// must never again be interpreted as the set of GPU-resident textures.
