@@ -81,6 +81,37 @@ type EffectGameplay = Pick<
 >;
 // TID4 6 in the COS type word: the captured quest monster.
 const CAPTURED_MONSTER_TYPE = 6 << 11;
+// 8DE74C loads [0xC14E6C], -pi/2 as a float, as the fYaw of every AT_TARGET
+// mover it hands to CIDecoSkillEffectEntity_Initialize (8D8E30). 8DE6C0 first
+// sets the mover's rotation axis byte +0xD4 to 0 (CIDecoStopObj's default,
+// 8E1054, is 1: yaw), so CIDecoMoveObj_OnTransformEvent (8E0E20, SetYaw's
+// event 3) turns an .efp compound by that angle about X: a pitch that stands
+// a shard's long axis upright, not a yaw.
+const TARGET_MOVER_PITCH = { axis: "x", angle: Math.fround( -Math.PI / 2 ) } as const;
+/*
+================
+targetMoverPoint
+
+One end of an AT_TARGET mover (CIDecoSkill_ExecuteStageCommandList case 3,
+8DE6C7..8DE748): the target's position plus the authored offset, added in
+world axes with float stores. Unlike a static stage (8D6330), native neither
+turns nor scales the offset by the target's root, and samples no bone or
+'*' height. The point carries no yaw: the mover is turned only by
+TARGET_MOVER_PITCH, whatever the target faces.
+================
+*/
+function targetMoverPoint(
+	pose: { readonly regionId: number; readonly x: number; readonly y: number; readonly z: number; },
+	offset: readonly [number, number, number]
+): CharacterActor["pose"] {
+	return {
+		regionId: pose.regionId,
+		x: Math.fround( pose.x + offset[0] ),
+		y: Math.fround( pose.y + offset[1] ),
+		z: Math.fround( pose.z + offset[2] ),
+		yaw: radians( 0 )
+	};
+}
 /*
 ================
 importedProjectileBasis
@@ -1282,8 +1313,12 @@ export function createCharacterEffects(
 							const radial = stage.action === "AT_MOV_OPTION",
 								chain = stage.action === "AT_MOV_SPLASH" && stage.move !== "MOV_HWAN";
 							const distributed = stage.action === "AT_MOV_1TAR" || stage.action === "AT_MOV_SPLASH";
+							// 8DE635: AT_TARGET builds a mover only for a non-zero start
+							// speed (+0x12); a MOV_STRAIGHT row at speed 0 is a static
+							// effect on the target, as MOV_NONE is.
 							const flying = distributed || radial || returning ||
-								!targetFollow && targetLocal && stage.move !== "MOV_NONE";
+								!targetFollow && targetLocal && (stage.movement?.startSpeed ?? 0) !== 0;
+							const staticTarget = targetLocal && !targetFollow && !flying;
 							const resultStage = impactIndex( cast.skill, trigger.phase, trigger.event );
 							const resultTargets = cast.results?.filter( row =>
 								resultStage < 0 || castResultAt( row.impacts, resultStage )
@@ -1357,7 +1392,10 @@ export function createCharacterEffects(
 								const commandRotation = stage.native?.rotation ?
 									projectNativeCommandRotation( stage.native.rotation ) :
 									undefined;
-								const effectRotation = rotation?.rotation ?? commandRotation;
+								// A flying .bsr keeps the 8D9233 travel basis (effectBasis).
+								const effectRotation = flying && targetLocal && stage.resource?.endsWith( ".efp" ) ?
+									TARGET_MOVER_PITCH :
+									rotation?.rotation ?? commandRotation;
 								const weapon = stage.resource === "weapon" ?
 									(caster?.gid === gameplay?.localGid ? gameplay?.inventory : caster?.equipment)
 										?.find( item => item.slot === 6 ) :
@@ -1411,7 +1449,7 @@ export function createCharacterEffects(
 											"AT_TARGET_F"
 										].includes(
 											stage.action
-										) || !targetFollow && stage.move !== "MOV_NONE" ||
+										) || !targetFollow && !staticTarget && stage.move !== "MOV_NONE" ||
 											(stage.bone &&
 												![ "AT_ONE_FOLLOW", "AT_LOOP", "AT_STOP" ].includes( stage.action ) &&
 												!targetLocal))) ||
@@ -1459,23 +1497,29 @@ export function createCharacterEffects(
 									if ( traded ) active.delete( gid );
 									// Effect world poses carry the native heading yaw; only the
 									// position comes from the binding (stageAnchor).
-									let source = sourceSocket ??
-										stageAnchor(
-											entity,
-											stageBinding( stage, false ),
-											trigger,
-											victimFacing ?? nativeHeadingYaw( pose.angle )
-										);
+									let source = flying && targetLocal ?
+										targetMoverPoint( pose, stage.offset ) :
+										sourceSocket ??
+											stageAnchor(
+												entity,
+												stageBinding( stage, false ),
+												trigger,
+												victimFacing ?? nativeHeadingYaw( pose.angle )
+											);
 									if ( !source ) {
 										unsupported.add( `anchor-height:${entity.refObjId}` );
 										continue;
 									}
-									if ( targetLocal && !flying && !targetFollow ) {
+									if ( staticTarget ) {
+										// 8DE67A..8DE69E: the static effect sits on the target's
+										// binding but takes the caster's m_fYaw (+0x88). The caster
+										// always exists natively; a port without its row keeps the
+										// target's heading.
 										const anchor = stageAnchor(
 											entity,
 											stageBinding( stage, true ),
 											trigger,
-											nativeHeadingYaw( pose.angle )
+											nativeHeadingYaw( casterAngle ?? pose.angle )
 										);
 										if ( !anchor ) {
 											unsupported.add( `anchor-height:${entity.refObjId}` );
@@ -1548,6 +1592,8 @@ export function createCharacterEffects(
 											stage.native!.actionOptions.direction,
 											stage.native!.actionOptions.distance
 										) :
+										flying && targetLocal ?
+										targetMoverPoint( pose, targetOffset ) :
 										targetSocket ??
 											(target ?
 												stageAnchor(
