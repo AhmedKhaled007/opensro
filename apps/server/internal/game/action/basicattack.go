@@ -505,12 +505,10 @@ func (rt *Runtime) advanceBasicAttackIntent(character *enterworld.Character, int
 		rt.finishCombatIntent(intent.DivisionID, intent.CharacterName)
 		return OpResult{DiagnosticRefusal: "combat-spacing-unavailable"}
 	}
-	if !spacing.Contains(live, targetSpawn) {
-		if intent.ComboRootID != 0 {
-			// A broken combo does not pursue and resume an old attack later.
-			rt.finishCombatIntent(intent.DivisionID, intent.CharacterName)
-			return OpResult{}
-		}
+	// 4AECE7 returns a linked stage to action state 2, which executes it;
+	// only state 1 measures range and pursues. A combo stage therefore
+	// never pursues, and never waits for its target to come back in reach.
+	if !spacing.Contains(live, targetSpawn) && intent.ComboRootID == 0 {
 		// Equipment is an authority input for every continuation tick. Keep the
 		// pursuit stop distance in the same freshly-resolved loadout snapshot as
 		// the eventual strike; otherwise swapping weapon families while chasing
@@ -522,7 +520,8 @@ func (rt *Runtime) advanceBasicAttackIntent(character *enterworld.Character, int
 		}
 		return rt.approachIntentTarget(character, snapshot, intent, spacing, live, targetSpawn, nowMs)
 	}
-	// Entering action range transfers ownership from movement to combat.
+	// Entering action range (or, for a combo stage, its turn, in reach or
+	// not) transfers ownership from movement to combat.
 	// Native B245 enters motion state 2 and stops local path following; commit
 	// the same live point on the authority plane so later range checks and
 	// peer corrections cannot continue an obsolete approach behind the attack.
