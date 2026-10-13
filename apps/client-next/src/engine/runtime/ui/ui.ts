@@ -7987,6 +7987,10 @@ export function createUi(
 			/*
 			================
 			authoredText
+
+			A static's text in its client rect. clipToControl keeps it inside
+			that rect: true ends a long line with an ellipsis, "clip" cuts it
+			at the edge.
 			================
 			*/
 			function authoredText(
@@ -7994,7 +7998,7 @@ export function createUi(
 				ox: number,
 				oy: number,
 				value: string,
-				clipToControl = false
+				clipToControl: boolean | "clip" = false
 			) {
 				const box = authoredClientRect( node, ox, oy );
 				quads.push(
@@ -8002,7 +8006,9 @@ export function createUi(
 						fontIndex: node.fontIndex,
 						hAlign: node.hAlign,
 						vAlign: node.vAlign,
-						...(clipToControl ? { overflow: "ellipsis" as const } : {})
+						...(clipToControl ?
+							{ overflow: clipToControl === "clip" ? "clip" as const : "ellipsis" as const } :
+							{})
 					} )
 				);
 			}
@@ -14353,7 +14359,11 @@ export function createUi(
 							py,
 							hudCopy( symbol ) + " - " + hudCopy( "UIIT_STT_AVATAR_MAGICOPTION_ADD_COUNT" ) + ": " +
 								free +
-								hudCopy( "UIIT_STT_UNIT" )
+								hudCopy( "UIIT_STT_UNIT" ),
+							// The English line is wider than its static: cut it at the static,
+							// as a native CIFStatic does, instead of drawing under the
+							// inventory beside the window.
+							"clip"
 						);
 					}
 					// 6EB3E0 backs every row with gil_bar02; the chosen row is selected.
