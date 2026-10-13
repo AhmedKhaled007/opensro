@@ -105,6 +105,10 @@ then a murderer's relief.
 func (rt *Runtime) settleDeathCostInDoor(division string, c *enterworld.Character, killer deathKiller, now int64) deathCost {
 	var cost deathCost
 	kind := rt.deathKind(division, c, killer)
+	// 4E6EC0 stores the kind at victim+0x1CB4. Natively it runs only with a
+	// killer, and the byte keeps the zero every revival wrote; the port's
+	// deathKind answers DeathNone for no killer, the same zero.
+	c.DeathKind = uint8(kind)
 	var penalty uint32
 	if c.PK != nil {
 		penalty = c.PK.Penalty

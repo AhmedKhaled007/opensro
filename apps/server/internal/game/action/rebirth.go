@@ -256,7 +256,15 @@ func (rt *Runtime) HandleLocalRebirth(
 	if before.DeletePending || enterworld.CharacterAlive(before) || corpse.MoveSegment != nil {
 		return OpResult{DiagnosticRefusal: "rebirth-requires-settled-corpse"}
 	}
-	if choice == wire.RebirthAtPresentPoint && before.Level != nil && *before.Level > 10 {
+	// 50FEE0 (5100D6): a team death (free-battle capes, arena) revives where
+	// it fell at any level, whatever the choice; otherwise the present point
+	// is a beginner's (level 10 or below, 51017F). The shard may set the town
+	// rule for team deaths too (teamdeath.go).
+	inPlace := rt.revivesInPlace(before.DeathKind)
+	if inPlace {
+		choice = wire.RebirthAtPresentPoint
+	}
+	if choice == wire.RebirthAtPresentPoint && !inPlace && before.Level != nil && *before.Level > 10 {
 		return OpResult{}
 	}
 	destination := corpse.Spawn
@@ -323,6 +331,7 @@ func (rt *Runtime) HandleLocalRebirth(
 		setCharacterWorld(character, arrivalWorld)
 		character.CurrentHP, character.CurrentMP = &restoredHP, &restoredMP
 		character.LastExpLoss = 0 // CGObjPC_TeleportToTown 4DF2E8
+		character.DeathKind = 0   // CGObjPC_TeleportToTown 4DF2EE
 		// The re-entry presents any waiting inventory expansion; the record
 		// adopts the capacity those packets carry (zero for a present-point
 		// rebirth, which builds no entry).

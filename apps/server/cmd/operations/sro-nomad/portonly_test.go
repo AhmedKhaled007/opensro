@@ -4,7 +4,7 @@
 portonly_test.go - the port-only switches reach the GameWorld job
 
 Storage auto-stack and the alchemy rates default to on (owner decisions
-2026-10-11); /SETSPEED defaults to on (2026-10-12); the enhancement cap defaults to on (2026-10-13); the reverse return map defaults to off. A deployer's value, including "off", passes
+2026-10-11); /SETSPEED defaults to on (2026-10-12); the enhancement cap defaults to on (2026-10-13); the team-death revive defaults to on, native (2026-10-13); the reverse return map defaults to off. A deployer's value, including "off", passes
 through unchanged.
 
 ===========================================================================
@@ -44,6 +44,24 @@ func TestPortOnlyJobVariables(t *testing.T) {
 			t.Fatalf("env %q/%q/%q: job variables %v/%v/%v, want %s/%s/%s", tc.stack, tc.reverse, tc.rates,
 				variables["storage_auto_stack"], variables["reverse_return_map"], variables["alchemy_rates"],
 				tc.wantStack, tc.wantReverse, tc.wantRates)
+		}
+	}
+}
+
+/*
+================
+TestTeamDeathReviveJobVariable
+
+team_death_revive defaults to on, native; "off" (the port-only town rule)
+and "on" pass through as written.
+================
+*/
+func TestTeamDeathReviveJobVariable(t *testing.T) {
+	for env, want := range map[string]string{"": "on", "on": "on", "off": "off"} {
+		t.Setenv("SRO_TEAM_DEATH_REVIVE", env)
+		variables := (&deployment{PortOnly: portOnlySettingsFromEnv()}).gameVariables(shardDeployment{})
+		if variables["team_death_revive"] != want {
+			t.Fatalf("env %q: team_death_revive %v, want %s", env, variables["team_death_revive"], want)
 		}
 	}
 }
