@@ -19,6 +19,9 @@ import (
 	"opensro.online/server/internal/agent/publicstats"
 	"opensro.online/server/internal/data/store"
 	"opensro.online/server/internal/domain"
+	"opensro.online/server/internal/game/enterworld"
+	"opensro.online/server/internal/game/world/monster"
+	"opensro.online/server/internal/game/world/simulation"
 )
 
 /*
@@ -168,5 +171,40 @@ func TestPublicScheduleShowsMaintenanceWhileTheGateExists(t *testing.T) {
 	events := publicSchedule(nil, time.Now())
 	if len(events) != 1 || events[0].Kind != "maintenance" || !events[0].Running || !events[0].End.IsZero() {
 		t.Fatalf("gate present listed %+v, want one running open-ended maintenance", events)
+	}
+}
+
+/*
+================
+TestUniqueNamesAreTheRetailNames
+
+The site printed MOB_OA_URUCHI because the API's name source was never
+wired. The source answers the display name, and "" for an unknown id so
+the API's own fallback decides.
+================
+*/
+func TestUniqueNamesAreTheRetailNames(t *testing.T) {
+	monsters := simulation.NewMonsterState(monster.TemplateFromParts(map[uint32]monster.MonsterRef{
+		1954: {RefObjID: 1954, Codename: "MOB_OA_URUCHI", Name: "Uruchi"},
+	}, nil))
+	// The API's sources as the GameWorld builds them: the wiring itself is
+	// what went missing.
+	game := &gameplayPlane{deps: &enterworld.Deps{MonsterState: monsters}}
+	sources := publicSources(game, nil, nil, "test")
+	if sources.UniqueName == nil {
+		t.Fatal("the public API's unique names are not wired")
+	}
+	if got := sources.UniqueName(1954); got != "Uruchi" {
+		t.Fatalf("wired name(1954) = %q, want Uruchi", got)
+	}
+	name := uniqueNameSource(monsters)
+	if got := name(1954); got != "Uruchi" {
+		t.Fatalf("name(1954) = %q, want Uruchi", got)
+	}
+	if got := name(7); got != "" {
+		t.Fatalf("name(unknown) = %q, want empty", got)
+	}
+	if got := uniqueNameSource(nil)(1954); got != "" {
+		t.Fatalf("no monster state answered %q", got)
 	}
 }
