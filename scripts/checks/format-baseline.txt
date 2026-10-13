@@ -323,7 +323,6 @@ apps/client-next/tests/browser/tooltips-live.test.mjs
 apps/client-next/tests/browser/travel.test.mjs
 apps/client-next/tests/browser/ui-bridge-lifecycle.test.mjs
 apps/client-next/tests/browser/ui-retail-audit.test.mjs
-apps/client-next/tests/browser/ui-specialized.test.mjs
 apps/client-next/tests/browser/ui.test.mjs
 apps/client-next/tests/browser/window-chrome-live.test.mjs
 apps/client-next/tests/browser/world-admission.test.mjs

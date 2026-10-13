@@ -137,7 +137,6 @@ tests/browser/tombstone-projectile.test.mjs
 tests/browser/travel.test.mjs
 tests/browser/ui-bridge-lifecycle.test.mjs
 tests/browser/ui-retail-audit.test.mjs
-tests/browser/ui-specialized.test.mjs
 tests/browser/ui.test.mjs
 tests/browser/window-chrome-live.test.mjs
 tests/browser/world-admission.test.mjs
