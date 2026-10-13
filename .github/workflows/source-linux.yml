@@ -63,6 +63,52 @@ jobs:
       - name: Verify client without generated retail assets
         run: node apps/client-next/tools/check.mjs --source
 
+  # The repository source policies that cover server files too. source-check
+  # (check.yml) skips a server-only pull request, so without this job such a
+  # pull request ran none of them (#881 merged a file past the size limit).
+  # Each gate needs only Node and the runner's Python, no node_modules. A mixed pull
+  # request also runs them in source-check; this job does not depend on that
+  # workflow's file filter, at the cost of a minute.
+  server-policy:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # One step per gate (the task runner takes one task), each run even
+      # after an earlier one fails so a pull request sees every problem.
+      - name: Source size
+        run: node scripts/task.mjs check:source-size
+      - name: Source encoding
+        if: ${{ !cancelled() }}
+        run: node scripts/task.mjs check:source-encoding
+      - name: Generated root
+        if: ${{ !cancelled() }}
+        run: node scripts/task.mjs check:generated-root
+      - name: Shared fixtures
+        if: ${{ !cancelled() }}
+        run: node scripts/task.mjs check:shared-fixtures
+      # Both check generated server outputs against their sources: the
+      # compiled quest package (internal/game/quest) and the loot catalogs
+      # (internal/game/item/loot/.generated). Standard-library Python only.
+      - name: Compiled quests
+        if: ${{ !cancelled() }}
+        run: node scripts/task.mjs check:compiled-quests
+      - name: Loot catalog
+        if: ${{ !cancelled() }}
+        run: node scripts/task.mjs check:loot-catalog
+      # ops/release's receivers and compatibility.json are server files; on
+      # Linux this also runs the POSIX-only tests Windows skips.
+      - name: Release
+        if: ${{ !cancelled() }}
+        run: node scripts/task.mjs check:release
+
   server-source:
     needs: changes
     if: needs.changes.outputs.server == 'true'
@@ -120,3 +166,38 @@ jobs:
           GOOS: windows
           CGO_ENABLED: "0"
         run: go vet ./...
+
+  # The one check from this workflow a ruleset can require (a job skipped by
+  # `if:` satisfies a required check). It always runs and fails when a job
+  # failed, or was skipped although this pull request's files needed it.
+  gate-summary:
+    name: gate-summary (linux)
+    needs: [changes, client-source, server-policy, server-source]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every Linux gate this change needs passed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CLIENT: ${{ needs.changes.outputs.client }}
+          SERVER: ${{ needs.changes.outputs.server }}
+          CLIENT_SOURCE: ${{ needs.client-source.result }}
+          SERVER_POLICY: ${{ needs.server-policy.result }}
+          SERVER_SOURCE: ${{ needs.server-source.result }}
+        run: |
+          [ "$CHANGES" = success ] || { echo "changes: $CHANGES"; exit 1; }
+          failed=0
+          # need NAME RESULT NEEDED: success passes, a skip passes only when
+          # the change did not need the job, anything else fails.
+          need() {
+            case "$2" in
+              success) echo "$1: success" ;;
+              skipped) if [ "$3" = true ]; then echo "$1 was skipped although this change needs it"; failed=1; else echo "$1: not needed"; fi ;;
+              *) echo "$1: $2"; failed=1 ;;
+            esac
+          }
+          need client-source "$CLIENT_SOURCE" "$CLIENT"
+          need server-policy "$SERVER_POLICY" "$SERVER"
+          need server-source "$SERVER_SOURCE" "$SERVER"
+          exit $failed
