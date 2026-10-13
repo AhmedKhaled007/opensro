@@ -56,7 +56,13 @@ const (
 var incidentJournalDirections = [...]string{"i", "o", "g"}
 
 // incidentKind names the failures a client may report.
-var incidentKinds = map[string]bool{"packet": true, "transport": true, "runtime": true, "asset": true, "unsupported": true}
+// "degraded" is the one non-fatal kind: the client skipped a cosmetic step
+// (a missing effect, a visual it could not resolve) and kept the session.
+var incidentKinds = map[string]bool{"packet": true, "transport": true, "runtime": true, "asset": true, "unsupported": true, "degraded": true}
+
+// degradedCategory files every degraded report apart from failures, for the
+// console's degraded groups (history degradedGroups).
+const degradedCategory = "degraded"
 
 var incidentNamePattern = regexp.MustCompile(`^[\p{L}\p{N}_\[\] .-]*$`)
 
@@ -99,8 +105,16 @@ The journal is not judged here: a bad journal never costs its incident
 ================
 */
 func (incident clientIncident) problem() string {
-	if incident.Category != "" && incident.Category != "expected" && incident.Category != "connection" && incident.Category != "software" && incident.Category != "unknown" {
+	if incident.Category != "" && incident.Category != "expected" && incident.Category != "connection" && incident.Category != "software" && incident.Category != "unknown" && incident.Category != degradedCategory {
 		return "unknown category"
+	}
+	// A degraded report names its site by a stable code: the console groups
+	// by it and an agent finds the throw site from it.
+	if incident.Kind == "degraded" && incident.Code == "" {
+		return "degraded report without a code"
+	}
+	if incident.Kind != "degraded" && incident.Category == degradedCategory {
+		return "degraded category on a fatal report"
 	}
 	if incident.ID != "" && !incidentIdentifier.MatchString(incident.ID) {
 		return "malformed id"
@@ -208,17 +222,24 @@ func (server *Server) handleClientIncident(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "code": "UNAUTHORIZED"})
 		return
 	}
-	if !server.incidentReports.Allow("account/" + claims.AccountID) {
-		w.Header().Set("Retry-After", "6")
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "code": "RATE_LIMITED"})
-		return
-	}
+	// The body is bounded (decodeJSON), so it is read before pacing: a
+	// degraded report draws on its own allowance, and the cosmetic reports
+	// can never use up the one a session-ending failure needs.
 	var incident clientIncident
 	reason := ""
 	if err := decodeJSON(r, &incident); err != nil {
 		reason = "malformed body: " + err.Error()
 	} else {
 		reason = incident.problem()
+	}
+	pace := server.incidentReports
+	if reason == "" && incident.Kind == "degraded" {
+		pace = server.degradedReports
+	}
+	if !pace.Allow("account/" + claims.AccountID) {
+		w.Header().Set("Retry-After", "6")
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "code": "RATE_LIMITED"})
+		return
 	}
 	if reason != "" {
 		// A refused report is evidence lost: name why, so a client change that
@@ -230,7 +251,6 @@ func (server *Server) handleClientIncident(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	fields := log.Fields{
-		"account":   claims.AccountID,
 		"shard":     definition.ID,
 		"kind":      incident.Kind,
 		"message":   strings.ToValidUTF8(incident.Message, "?"),
@@ -245,6 +265,10 @@ func (server *Server) handleClientIncident(w http.ResponseWriter, r *http.Reques
 		fields["payloadSize"] = incident.PayloadSize
 	}
 	eventFields := map[string]string{"phase": incident.Phase, "region": fmt.Sprint(incident.Region)}
+	if incident.Payload != "" {
+		// The console shows a group's example frame from its newest event.
+		eventFields["payload"] = incident.Payload
+	}
 	if problem := incidentJournalProblem(incident.Journal); problem != "" {
 		fields["journalInvalid"] = problem
 		eventFields["journalInvalid"] = problem
@@ -269,6 +293,9 @@ func (server *Server) handleClientIncident(w http.ResponseWriter, r *http.Reques
 	if incident.Category != "" {
 		category = incident.Category
 	}
+	if incident.Kind == "degraded" {
+		category = degradedCategory
+	}
 	code := incident.Code
 	if code == "" {
 		code = incident.Kind + "_failure"
@@ -287,6 +314,15 @@ func (server *Server) handleClientIncident(w http.ResponseWriter, r *http.Reques
 	}
 	fields["incident"] = id
 	fields["diagnosticSession"] = incident.Session
+	fields["code"] = code
+	// A degraded line names no account: the history event keeps it, and
+	// a cosmetic skip is triaged by site code, not by player.
+	if incident.Kind == "degraded" {
+		log.WithFields(fields).Warn("agent: client degraded")
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
+		return
+	}
+	fields["account"] = claims.AccountID
 	log.WithFields(fields).Warn("agent: client incident")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
 }
