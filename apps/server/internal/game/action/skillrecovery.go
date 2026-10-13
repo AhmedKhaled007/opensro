@@ -186,10 +186,14 @@ func (rt *Runtime) acceptSupportSkillPhase(
 		return rt.prepareSupportCast(division, snapshot, cast, skill, now), skillCastAccepted
 	}
 
-	var party []uint32
-	if partyHeal || partyResu || partyOverTime {
-		party = rt.skillCureVector(division, snapshot, skill, cast, now)
+	// 593F50's action vector: the party selections walk it, and so does the
+	// effect add every instant row sends (skillrecoveryeffect.go). It reads
+	// the store, so it is resolved before the caster's door.
+	var vector []uint32
+	if partyOverTime || !overTime {
+		vector = rt.skillCureVector(division, snapshot, skill, cast, now)
 	}
+	party := vector
 	// The cure vector reads the store; resolve it before the caster's door.
 	var cureTargets []cureTarget
 	if cure {
@@ -347,6 +351,11 @@ func (rt *Runtime) acceptSupportSkillPhase(
 			share = share * (fullHealPercent - skill.Abnormal.EffectArea.Reduction) / fullHealPercent
 		}
 	}
+	// 59466F sends each recipient's effect add, around that recipient.
+	var around []ObservedFrames
+	if !overTime {
+		around = recoveryEffectRoutes(skill, rt.recoveryEffectRecipients(division, snapshot, skill, vector, now))
+	}
 
 	var token uint32
 	if release != nil {
@@ -373,13 +382,15 @@ func (rt *Runtime) acceptSupportSkillPhase(
 		)
 
 		control := wire.SkillCastReleaseFrame(token, enterworld.ObjectIDForCharacter(snapshot))
-		return supportCastResult(
+		result := supportCastResult(
 			control,
 			vitals,
 			cureActor,
 			curePublic,
 			cureRecipients,
-		), skillCastAccepted
+		)
+		result.Around = around
+		return result, skillCastAccepted
 	}
 
 	rt.queueSkillFinalize(
@@ -397,13 +408,15 @@ func (rt *Runtime) acceptSupportSkillPhase(
 		wire.SkillCastFinalizeFrame(token),
 	)
 
-	return supportCastResult(
+	result := supportCastResult(
 		open,
 		vitals,
 		cureActor,
 		curePublic,
 		cureRecipients,
-	), skillCastAccepted
+	)
+	result.Around = around
+	return result, skillCastAccepted
 }
 
 /*

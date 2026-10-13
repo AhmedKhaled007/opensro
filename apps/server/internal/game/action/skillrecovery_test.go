@@ -59,16 +59,21 @@ func TestSelfRecoveryCommitsHealingCostAndCompleteBracket(t *testing.T) {
 		t.Fatal("release restarted cooldown")
 	}
 
-	if len(released) != 2 ||
+	// Release around the caster, effect add around its recipient (the caster), vitals to it alone.
+	casterGID := enterworld.ObjectIDForCharacter(c)
+	if len(released) != 3 ||
 		len(released[0].Frames) != 1 ||
 		released[0].Frames[0].Opcode != wire.OpSkillEffectControl ||
-		released[1].OnlyCharacterID != c.ID ||
+		released[1].SourceGID != casterGID ||
 		len(released[1].Frames) != 1 ||
-		released[1].Frames[0].Opcode != simulation.OpVitalsUpdate {
+		released[1].Frames[0].Opcode != wire.OpAttachedEffect ||
+		released[2].OnlyCharacterID != c.ID ||
+		len(released[2].Frames) != 1 ||
+		released[2].Frames[0].Opcode != simulation.OpVitalsUpdate {
 		t.Fatal("release routing", released)
 	}
 
-	if binary.LittleEndian.Uint16(released[1].Frames[0].Payload[4:]) != 0x40 {
+	if binary.LittleEndian.Uint16(released[2].Frames[0].Payload[4:]) != 0x40 {
 		t.Fatal("recovery source flag lost")
 	}
 
