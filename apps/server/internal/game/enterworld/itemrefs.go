@@ -21,7 +21,6 @@ import (
 	"sync"
 	"unicode/utf16"
 
-	"opensro.online/server/internal/game/item/wire"
 	"opensro.online/server/internal/game/world/monster"
 
 	log "github.com/sirupsen/logrus"
@@ -51,6 +50,10 @@ type TextdataItems struct {
 	byID                 map[uint32]*ItemRef
 	charactersByCodename map[string]*CharacterRef
 	summonableCharacters []CharacterRef
+	// refusedSummonRows names service characterdata rows a summon item
+	// reaches that buildCharacterRef refused: authored data the port cannot
+	// read, which would fail a player's summon (RefusedSummonRows).
+	refusedSummonRows []string
 }
 
 // NewTextdataItems returns a lazy loader over dir (itemdata*.txt +
@@ -221,6 +224,7 @@ func (t *TextdataItems) load() {
 	}
 
 	characterRows := 0
+	refused := map[string]bool{}
 	for _, entry := range entries {
 		lower := strings.ToLower(entry.Name())
 		if entry.IsDir() || !strings.HasPrefix(lower, "characterdata") || !strings.HasSuffix(lower, ".txt") {
@@ -229,6 +233,9 @@ func (t *TextdataItems) load() {
 		for _, fields := range readTextdataFile(filepath.Join(t.dir, entry.Name())) {
 			ref := buildCharacterRef(fields, names)
 			if ref == nil {
+				if len(fields) > 2 && strings.TrimSpace(fields[0]) == "1" && strings.TrimSpace(fields[2]) != "" {
+					refused[strings.TrimSpace(fields[2])] = true
+				}
 				continue
 			}
 			t.charactersByCodename[ref.Codename] = ref
@@ -236,34 +243,7 @@ func (t *TextdataItems) load() {
 		}
 	}
 
-	summonable := make(map[string]struct{})
-	for _, item := range t.byCodename {
-		if item == nil || (item.TypeIDs != [4]int64{3, 3, 3, 2} && !wire.IsCosSummoner(item.TypeFlags())) || item.AssociatedCharacterCodename == "" {
-			continue
-		}
-		for _, code := range summonCharacterCodenames(item) {
-			summonable[code] = struct{}{}
-		}
-	}
-	// Retained pets advance to later characterdata rows. Their item still
-	// names the initial row, so publish the whole supported pet family.
-	for code, ref := range t.charactersByCodename {
-		if ref.TidWord&0x7fe == 0x1c6 && (ref.TidWord>>11 == 3 || ref.TidWord>>11 == 4 || ref.TidWord>>11 == 5) {
-			summonable[code] = struct{}{}
-		}
-	}
-	keys := make([]string, 0, len(summonable))
-	for codename := range summonable {
-		keys = append(keys, codename)
-	}
-	sort.Strings(keys)
-	for _, codename := range keys {
-		if ref := t.charactersByCodename[codename]; ref != nil {
-			t.summonableCharacters = append(t.summonableCharacters, *ref)
-		} else {
-			log.Warnf("bootstrap: summon item references missing characterdata row %q", codename)
-		}
-	}
+	t.collectSummonable(refused)
 	log.Infof("bootstrap: textdata loaded from %s (%d item row(s), %d character row(s), %d summonable COS row(s))", t.dir, rows, characterRows, len(t.summonableCharacters))
 }
 
@@ -342,7 +322,9 @@ func buildCharacterRef(fields []string, names map[string]string) *CharacterRef {
 	// Keep it on the character reference so every summon/restoration agrees.
 	const inventoryCapacityColumn = 67
 	capacity, capacityOK := textdataInt(fields[inventoryCapacityColumn])
-	if !capacityOK || capacity < 0 || capacity > 140 {
+	// The 0x3158 capacity is one byte; v1.150 authors transport bags up to
+	// 177 slots (the item-mall transports' level 90/105/120 rows).
+	if !capacityOK || capacity < 0 || capacity > math.MaxUint8 {
 		return nil
 	}
 	nameStrID := strings.TrimSpace(fields[5])
