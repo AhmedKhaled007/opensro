@@ -231,12 +231,33 @@ func (v *WaterValidator) ClipMovementPathFrom(from simulation.Spawn, fromOwner s
 		dz := f(to.Z + float64(simulation.SectorY(to.RegionID)-simulation.SectorY(start.RegionID))*1920 - start.Z)
 		dy := f(to.Y - start.Y)
 		if f(dy*dy+dx*dx+dz*dz) < 25 {
-			return report
+			return continuedReport(report)
 		}
 		start = report.Rest
 		startOwner = report.RestOwner
 	}
 	return ClipReport{Outcome: ClipBlocked, Class: ClipClassObject, Rest: from, RestOwner: fromOwner, TilesChecked: checked, TilesUncovered: uncovered, ObjectDeckOverrides: overrides, NativeResult: monster.NavResultBlocked}
+}
+
+/*
+================
+continuedReport
+
+QueryMovement (98B300) ends a continuation run once the leg's start is
+within 5 units of the destination: it breaks with the leg's own result,
+which carries a continuation bit (0x14) and no failure bit (0x10000001 broke
+earlier), and the position the leg reached. That is a completed step, not a
+block. An object outline exit to terrain (403FB0, 4044CE..4044FE) is such a
+leg, so a short step off an open deck edge stands at the exit point on the
+terrain below.
+================
+*/
+func continuedReport(report ClipReport) ClipReport {
+	report.Outcome = ClipArrived
+	report.Class = ""
+	report.BlockedTileX, report.BlockedTileZ = 0, 0
+	report.NativeResult = report.NativeResult&nativeLinkedResult | nativeContinueResult
+	return report
 }
 
 /*
@@ -452,13 +473,24 @@ func (v *WaterValidator) clipObjectRest(report ClipReport, walk *navWalk, from, 
 		return report
 	}
 	if point.outside || point.continuation && point.outline {
-		// Native outline reflection returns no object cell (428930 bit
-		// 0x10); the terrain continuation must not repair itself back INTO
-		// the cell it just exited. That loops forever at open outlines.
-		if owner, y, ok := v.ResolveNavOwner(report.Rest, simulation.TerrainOwner()); ok {
-			report.RestOwner, report.Rest.Y = owner, y
+		tile, blocked := v.exitTileBlocked(from.RegionID, point.x, point.z)
+		if !blocked {
+			// Native outline reflection returns no object cell (428930 bit
+			// 0x10); the terrain continuation must not repair itself back
+			// INTO the cell it just exited. That loops forever at open
+			// outlines.
+			if owner, y, ok := v.ResolveNavOwner(report.Rest, simulation.TerrainOwner()); ok {
+				report.RestOwner, report.Rest.Y = owner, y
+			}
+			return report
 		}
-		return report
+		// 403FB0 tests the terrain tile under the exit point before it hands
+		// the walker to the terrain (4038D0, 4044D9 test al,1) and fails the
+		// leg on a blocked one (404194: 0x10000000). Nothing continues; the
+		// walker stays on the deck at the rim (the object owner below).
+		report.continuation = false
+		report.NativeResult = monster.NavResultBlocked
+		report.BlockedTileX, report.BlockedTileZ = tile.x, tile.z
 	}
 	// A cell-directed contact point already lies on an object plane (its Y is
 	// a surface height, not the request's). Keep the walk's object owner when
@@ -472,6 +504,27 @@ func (v *WaterValidator) clipObjectRest(report ClipReport, walk *navWalk, from, 
 		report.RestOwner, report.Rest.Y = owner, y
 	}
 	return report
+}
+
+/*
+================
+exitTileBlocked
+
+Whether the terrain tile under an object exit point (world grid x, z) is
+blocked: the bit-0 tile flag 403FB0 reads through 4038D0 before an outline
+exit continues on the terrain. Missing coverage is never a block (the
+package's fail-open policy).
+================
+*/
+func (v *WaterValidator) exitTileBlocked(regionID uint16, wx, wz float64) (globalTile, bool) {
+	tilesPerAxis, tileSize, ok := v.gridParamsForRegion(regionID)
+	if !ok {
+		return globalTile{}, false
+	}
+	tile := globalTile{x: int(math.Floor(wx / tileSize)), z: int(math.Floor(wz / tileSize))}
+	querier := &tileQuerier{v: v, tilesPerAxis: tilesPerAxis, grids: make(map[int64]*blockedGrid, 1)}
+	walkable, known := querier.walkable(tile)
+	return tile, known && !walkable
 }
 
 /*
@@ -794,7 +847,9 @@ func (c *ClientClip) processOwnedStep(characterName string, from simulation.Spaw
 		c.applied.Add(1)
 		return report.Rest, report.RestOwner, true
 	}
-	if c.Mode == ClipApply && report.Outcome == ClipArrived && report.NativeResult&nativeLinkedResult != 0 {
+	// A continued step (a linked cell, or an outline exit 98B300 ended
+	// within 5 units) stands where the leg reached, on that leg's owner.
+	if c.Mode == ClipApply && report.Outcome == ClipArrived && report.NativeResult&nativeContinueResult != 0 {
 		return report.Rest, report.RestOwner, false
 	}
 	return to, simulation.NavOwner{}, false
