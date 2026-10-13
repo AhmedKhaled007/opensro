@@ -72,6 +72,18 @@ type SessionEnder interface {
 
 /*
 ================
+BanObserver
+
+The owner told about a completed /BAN (the action runtime, which purges
+the website chat feed). Port-only, not native.
+================
+*/
+type BanObserver interface {
+	PlayerBannedGM(divisionID, characterName string)
+}
+
+/*
+================
 handleWorldStatus
 
 51DE90 case 3: [1, 4, i32 players, i32 other objects, i32 ground items],
@@ -102,7 +114,7 @@ departure owner saves and removes them exactly as on a logout, and leaves
 an operator log line naming the GM and the player.
 ================
 */
-func handleBan(deps Dependencies, presence PresenceView, divisionID string, sender *enterworld.Character, request Request) Outcome {
+func handleBan(deps Dependencies, presence PresenceView, divisionID string, sender *enterworld.Character, request Request, status []BodyStatusCommands) Outcome {
 	refusal := Outcome{Ack: EncodeRequestFailure(request), Refusal: "ban-refused"}
 	if !request.HasName || request.Name == "" {
 		return refusal
@@ -112,7 +124,20 @@ func handleBan(deps Dependencies, presence PresenceView, divisionID string, send
 		return refusal
 	}
 	target := characterSnapshot(deps, divisionID, findCharacterByName(deps, divisionID, request.Name))
-	if target == nil || target.DeletePending || !directory.EndSessionByName(divisionID, target.Name) {
+	if target == nil || target.DeletePending {
+		return refusal
+	}
+	// Port-only: the website's chat feed drops the named player's lines
+	// whether or not they are still in the world. Natively /BAN of an
+	// offline player is refused and does nothing; the GM's intent to remove
+	// them is plain, and a player who spoke and logged off would otherwise
+	// stay on the site until newer lines pushed them out.
+	if len(status) > 0 {
+		if owner, ok := status[0].(BanObserver); ok {
+			owner.PlayerBannedGM(divisionID, target.Name)
+		}
+	}
+	if !directory.EndSessionByName(divisionID, target.Name) {
 		return refusal
 	}
 	// The operator trail (#681), as a silk grant leaves one: who removed
