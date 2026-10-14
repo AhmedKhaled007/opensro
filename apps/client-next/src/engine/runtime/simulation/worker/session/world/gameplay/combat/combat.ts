@@ -934,6 +934,16 @@ export function createCombat(
 		},
 		/*
 		================
+		wireHp
+		The server's last HP for gid (0x33A6, entry seed): native +0x440, as
+		70C550 compares. Hit results never lower it (display: vitals.hp).
+		================
+		*/
+		wireHp( gid: number ): number | undefined {
+			return wireHp.get( gid );
+		},
+		/*
+		================
 		state
 		Publish stable snapshots until an owner mutation invalidates them.
 		================
