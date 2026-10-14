@@ -5,9 +5,9 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"net/url"
 	"strings"
 	"sync"
@@ -55,6 +55,10 @@ type Server struct {
 	cfg        Config
 	wtServer   *webtransport.Server
 	httpServer *http.Server
+	// pprofServer is the loopback profiling listener (pprof.go), nil when
+	// profiling is off.
+	pprofServer *http.Server
+	pprofAddr   string
 
 	mu      sync.Mutex
 	udpConn *net.UDPConn
@@ -280,19 +284,6 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 		_ = json.NewEncoder(w).Encode(document)
 	})
-	// pprof is explicit opt-in (TRANSPORT_PPROF=1 / transport.pprof) and
-	// OFF by default: profiling endpoints leak internals and CPU, so they
-	// must never ride a public listener by accident. Handlers register on
-	// THIS mux only — nothing in this process serves http.DefaultServeMux,
-	// so the net/http/pprof import's init-time registration there is moot.
-	if cfg.EnablePprof {
-		tcpMux.HandleFunc("/debug/pprof/", pprof.Index)
-		tcpMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		tcpMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		tcpMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		tcpMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		log.Info("transport: pprof enabled on the loopback TCP listener (/debug/pprof/)")
-	}
 	s.httpServer = &http.Server{
 		Handler:           tcpMux,
 		ReadHeaderTimeout: httpReadHeaderTimeout,
@@ -460,19 +451,43 @@ func (s *Server) Start() error {
 		return fmt.Errorf("transport: EnterWorld authentication verifier is not installed")
 	}
 
+	// Each listener bound so far closes when a later bind fails, so a failed
+	// Start leaves no port held.
+	var bound []io.Closer
+	fail := func(err error) error {
+		for _, closer := range bound {
+			closer.Close()
+		}
+		return err
+	}
+	var pprofLn net.Listener
+	if s.cfg.EnablePprof {
+		addr := s.cfg.PprofAddr
+		if addr == "" {
+			addr = DefaultPprofAddr
+		}
+		server, err := newPprofServer(addr)
+		if err != nil {
+			return err
+		}
+		if pprofLn, err = net.Listen("tcp", addr); err != nil {
+			return fmt.Errorf("transport: binding pprof %s: %w", addr, err)
+		}
+		bound = append(bound, pprofLn)
+		s.pprofServer = server
+	}
 	tcpLn, err := net.Listen("tcp", s.cfg.WSAddr)
 	if err != nil {
-		return fmt.Errorf("transport: binding TCP %s: %w", s.cfg.WSAddr, err)
+		return fail(fmt.Errorf("transport: binding TCP %s: %w", s.cfg.WSAddr, err))
 	}
+	bound = append(bound, tcpLn)
 	udpAddr, err := net.ResolveUDPAddr("udp", s.cfg.WTAddr)
 	if err != nil {
-		tcpLn.Close()
-		return fmt.Errorf("transport: resolving UDP %s: %w", s.cfg.WTAddr, err)
+		return fail(fmt.Errorf("transport: resolving UDP %s: %w", s.cfg.WTAddr, err))
 	}
 	udpConn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
-		tcpLn.Close()
-		return fmt.Errorf("transport: binding UDP %s: %w", s.cfg.WTAddr, err)
+		return fail(fmt.Errorf("transport: binding UDP %s: %w", s.cfg.WTAddr, err))
 	}
 	s.tcpLn = tcpLn
 	s.udpConn = udpConn
@@ -480,6 +495,15 @@ func (s *Server) Start() error {
 	s.wtServeDone = make(chan struct{})
 	s.httpServeDone = make(chan struct{})
 
+	if pprofLn != nil {
+		go func() {
+			if err := s.pprofServer.Serve(pprofLn); err != nil && err != http.ErrServerClosed {
+				log.WithError(err).Warn("transport: pprof listener stopped")
+			}
+		}()
+		s.pprofAddr = pprofLn.Addr().String()
+		log.WithField("addr", s.pprofAddr).Info("transport: pprof enabled on its loopback listener (/debug/pprof/)")
+	}
 	go func() {
 		defer close(s.httpServeDone)
 		if err := s.httpServer.Serve(tcpLn); err != nil && err != http.ErrServerClosed {
@@ -576,6 +600,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			err = ctx.Err()
 		}
 	}
+	if s.pprofServer != nil {
+		_ = s.pprofServer.Close()
+	}
 	if httpError := s.httpServer.Shutdown(ctx); httpError != nil {
 		_ = s.httpServer.Close()
 		if err == nil {
@@ -592,4 +619,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	return err
+}
+
+/*
+================
+Server.PprofAddr
+
+The bound profiling listener, or "" when profiling is off.
+================
+*/
+func (s *Server) PprofAddr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pprofAddr
 }
