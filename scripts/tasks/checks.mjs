@@ -13,6 +13,10 @@ and every suite that reads them.
 
 import { commandTask, pipelineTask, seriesTask } from "./define.mjs";
 
+// The operator console and its sign-in service: no game data, so their tests
+// are source gates (check:console), not left to the full workspace check.
+const CONSOLE_PACKAGES = [ "@sro/server-observatory", "@sro/server-console-auth" ];
+
 export const CHECK_TASKS = [
 	commandTask( {
 		name: "check:loot-catalog",
@@ -226,6 +230,16 @@ export const CHECK_TASKS = [
 		args: [ "-r", "--filter=!sro-browser-rebuild", "typecheck" ]
 	} ),
 	commandTask( {
+		name: "check:console",
+		description: "Run the operator console and console sign-in tests",
+		kind: "check",
+		ci: true,
+		requires: [],
+		timeoutClass: "medium",
+		command: "pnpm",
+		args: [ "--filter", CONSOLE_PACKAGES[0], "--filter", CONSOLE_PACKAGES[1], "check" ]
+	} ),
+	commandTask( {
 		name: "workspace:check",
 		description: "Run each non-root workspace package check script",
 		kind: "internal",
@@ -233,12 +247,19 @@ export const CHECK_TASKS = [
 		requires: [],
 		timeoutClass: "long",
 		command: "pnpm",
-		args: [ "-r", "--filter=!sro-browser-rebuild", "check" ]
+		// check:console already runs the console packages in the source gates.
+		args: [
+			"-r",
+			"--filter=!sro-browser-rebuild",
+			...CONSOLE_PACKAGES.map( ( name ) => "--filter=!" + name ),
+			"check"
+		]
 	} )
 ];
 
 const sourceTasks = [
 	"check:release",
+	"check:console",
 	"check:loot-catalog",
 	"check:compiled-quests",
 	"check:client-preparation",
@@ -299,6 +320,8 @@ export const CHECK_PIPELINES = Object.freeze( {
 		// The Go tests and the package checks read the server projection.
 		{ id: "server", task: "check:server", after: [ "server-game-data" ] },
 		{ id: "typecheck-packages", task: "workspace:check", after: [ "server-game-data" ] },
+		// The console's item test reads the observatory catalog that build writes.
+		{ id: "console", task: "check:console", after: [ "server-game-data" ] },
 		{ id: "test-assets", task: "test:assets", after: [ "build-resources" ] },
 		{ id: "asset-pack-integrity", task: "assets:check:integrity", after: [ "build-resources" ] },
 		{ id: "test-cif", task: "test:cif", after: [ "build-resources" ] },
