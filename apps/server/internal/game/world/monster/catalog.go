@@ -236,9 +236,44 @@ func LoadTemplate(textdataDir string) Template {
 		}
 		nests = append(nests, nest)
 	}
+	restoreZeroCapNests(refs, nests, loadZeroCapCaps(zeroCapCapsTSV))
 	template := TemplateFromParts(refs, nests)
 	template.EvidenceMatches = evidenceMatches
 	return template
+}
+
+/*
+==================
+restoreZeroCapNests
+
+Gives a standalone nest capped at zero its live cap from ISRO-R.
+
+The v1.188 evidence is one operator's shard backup. Beside the monsters it
+disables everywhere (laterDisabledCodenames), it zeroes single nests of
+monsters that keep live nests right beside them: the Bandit Stronghold
+building's bandits and archers (regions 0x5BA0, 0x5CA0), the Stone Cave's
+Nachal and Work Earth Ghost (0x8001), three KT Ong. The v1.150 client still
+places every one of them, and native 55EA90 spawns nothing while the live
+count is not below dwMaxTotalCount. ISRO-R's active Tab_RefNest keeps the
+same nests, by region and anchor, with live caps (isror_zero_cap_caps.tsv,
+scripts/build/import_isror_zero_caps.py); the dungeon layer matches by its
+own region id. A hive member (dwOverwriteMaxTotalCount above zero) is left
+alone: 55EC10 caps it with the hive's own limit.
+==================
+*/
+func restoreZeroCapNests(refs map[uint32]MonsterRef, nests []NestRow, caps map[populationEvidenceKey]int) {
+	for i := range nests {
+		nest := &nests[i]
+		if !nest.RetailEvidence || nest.MaxCount != 0 || nest.HiveMaxCount > 0 {
+			continue
+		}
+		key := evidenceKey(refs[nest.RefObjID].Codename, nest.RegionID, nest.X, nest.Y, nest.Z)
+		cap, ok := caps[key]
+		if !ok {
+			panic("monster: no ISRO-R cap for zero-cap nest " + key.Codename)
+		}
+		nest.MaxCount = cap
+	}
 }
 
 /*
