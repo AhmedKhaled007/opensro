@@ -198,7 +198,29 @@ func shardShops(dir string, items enterworld.ItemRefSource) (*commerce.Catalog, 
 	if sun := progression.SunEventOnlyFromEnv(); sun.Enabled() {
 		shops.WithholdGoods(func(ref *enterworld.ItemRef) bool { return action.SunExcludes(sun, ref) })
 	}
+	// And prices trade goods the same way (SRO_TRADE_TIERS).
+	if action.TradeTiersFromEnv() {
+		shops.ScaleTradeGoodsPrices(enterworld.TradeGoodsPriceFactor)
+	}
 	return shops, nil
+}
+
+/*
+================
+shardItems
+
+The item references as the GameWorld holds them: SRO_TRADE_TIERS prices
+trade goods at TradeGoodsPriceFactor times their v1.150 price.
+================
+*/
+func shardItems(dir string) (*enterworld.TextdataItems, error) {
+	items := enterworld.NewTextdataItems(dir)
+	if action.TradeTiersFromEnv() {
+		if _, err := items.ApplyTradeGoodsPriceFactor(enterworld.TradeGoodsPriceFactor); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 /*
@@ -237,12 +259,19 @@ func run(out, release, textdata string) error {
 	}
 	header := catalogue.Header{SchemaVersion: catalogue.SchemaVersion, Release: release,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339)}
-	refs := itemRefs(enterworld.NewTextdataItems(dir))
+	refItems, err := shardItems(dir)
+	if err != nil {
+		return err
+	}
+	refs := itemRefs(refItems)
 	if len(refs) == 0 {
 		return fmt.Errorf("no item references loaded from %s", dir)
 	}
 	items := catalogue.BuildItems(catalogue.ItemSource{Refs: refs, Usable: action.ItemUseSupported})
-	itemSource := enterworld.NewTextdataItems(dir)
+	itemSource, err := shardItems(dir)
+	if err != nil {
+		return err
+	}
 	questCatalog := quest.NewCatalog(dir)
 	definitions, err := quest.LoadDefinitions(questCatalog, itemSource)
 	if err != nil {
@@ -322,6 +351,15 @@ func run(out, release, textdata string) error {
 		enterworld.NewTextdataMagicOptions(dir).AllMagicOptions()); err != nil {
 		return err
 	}
+	tradeQuotes := catalogue.BuildTrade(shops.TradeQuotations, itemByID, func(id uint32) bool { return placedNpcs[id] })
+	// SRO_TRADE_TIERS (port-only, not native): the shard's route profit.
+	if action.TradeTiersFromEnv() {
+		route, codenames := action.TradeRouteProfit(shops), map[uint32]string{}
+		for _, npc := range npcs {
+			codenames[npc.ID] = npc.Codename
+		}
+		catalogue.ApplyTradeRoutes(tradeQuotes, func(npcID, itemID uint32) int64 { return route(codenames[npcID], itemID) }, action.RaiseRouteProfit)
+	}
 	files := map[string]any{
 		"items.json":    catalogue.ItemsFile{Header: header, Items: items},
 		"quests.json":   catalogue.QuestsFile{Header: header, Quests: quests},
@@ -336,12 +374,11 @@ func run(out, release, textdata string) error {
 				}
 				return row.Codename
 			}}),
-		"search.json": catalogue.SearchFile{Header: header, Entries: []catalogue.SearchEntry{}},
-		"atlas.json":  catalogue.NewAtlas(header),
-		"notes.json":  catalogue.NotesFile{Header: header, Entries: []catalogue.NoteEntry{}},
-		"levels.json": catalogue.BuildLevels(header, enterworld.NewTextdataLevels(dir), betaMastery),
-		"trade.json": catalogue.TradeFile{Header: header, ThiefRate: catalogue.ThiefRate(),
-			Quotes: catalogue.BuildTrade(shops.TradeQuotations, itemByID, func(id uint32) bool { return placedNpcs[id] })},
+		"search.json":     catalogue.SearchFile{Header: header, Entries: []catalogue.SearchEntry{}},
+		"atlas.json":      catalogue.NewAtlas(header),
+		"notes.json":      catalogue.NotesFile{Header: header, Entries: []catalogue.NoteEntry{}},
+		"levels.json":     catalogue.BuildLevels(header, enterworld.NewTextdataLevels(dir), betaMastery),
+		"trade.json":      catalogue.TradeFile{Header: header, ThiefRate: catalogue.ThiefRate(), Quotes: tradeQuotes},
 		"droptables.json": catalogue.BuildDropTables(monsters, dropItemID, header),
 		"summary.json": catalogue.Summarize(header, catalogue.SummaryInput{Items: catalogue.ItemStandings(items),
 			Skills: catalogue.SkillStandings(skills), Quests: catalogue.QuestStandings(quests), Monsters: catalogue.MonsterStandings(monsters)}),
