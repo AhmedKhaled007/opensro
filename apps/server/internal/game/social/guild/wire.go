@@ -80,6 +80,9 @@
 package guild
 
 import (
+	"errors"
+	"unicode/utf8"
+
 	"opensro.online/server/internal/game/item/wire"
 )
 
@@ -290,6 +293,9 @@ func EncodeInvitePrompt3393(inviterRef uint32) []byte {
 	return wire.NewWriter(5).U8(InvitationTypeGuild).U32(inviterRef).Payload()
 }
 
+// errInvalidText refuses player text that is not valid UTF-8.
+var errInvalidText = errors.New("text is not valid UTF-8")
+
 // readSizedString consumes the sized-ANSI layout {u16 byte length, the
 // bytes} the guild bodies carry (the same shape the friend lane
 // decodes).
@@ -301,6 +307,11 @@ func readSizedString(reader *wire.Reader) (string, error) {
 	raw, err := reader.Bytes(int(length))
 	if err != nil {
 		return "", err
+	}
+	// Player text is stored and replayed to other players at world entry:
+	// only valid UTF-8 is admitted, so no stored text can fail a reader.
+	if !utf8.Valid(raw) {
+		return "", errInvalidText
 	}
 	return string(raw), nil
 }
