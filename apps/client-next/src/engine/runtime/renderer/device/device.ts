@@ -5,6 +5,7 @@ device.ts - WebGPU generation and resource lifecycle
 
 ===========================================================================
 */
+import { type GpuFacts, isGpuToken, reportedGpuFeatures } from "@/engine/foundation/rendering/gpu-facts";
 import { createBloom } from "./bloom";
 import { createFinish } from "./finish";
 import { createHdr } from "./hdr";
@@ -28,6 +29,33 @@ const DEFAULT_TEXTURE_DETAIL = 2;
 // native 336 bytes, the sun-direction vec4, then the two experimental
 // stages vec4s and the sun shadow cascade matrix.
 const FULLSCREEN_VERTEX_COUNT = 6;
+
+/*
+================
+gpuFacts
+
+The facts of one adapter for bug reports (foundation/rendering/gpu-facts.ts).
+Vendor and architecture are kept only when they are short lowercase tokens.
+Diagnostics never fail a device: an adapter missing a field reports 0 or
+nothing for it.
+================
+*/
+function gpuFacts( adapter: GPUAdapter ): GpuFacts {
+	const info = (adapter as GPUAdapter & { info?: { vendor?: string; architecture?: string; }; }).info;
+	const token = ( value: string | undefined ) => value && isGpuToken( value ) ? value : undefined;
+	const vendor = token( info?.vendor ), architecture = token( info?.architecture );
+	const limits = adapter.limits as Partial<GPUSupportedLimits> | undefined;
+	return {
+		features: reportedGpuFeatures().filter( name => adapter.features?.has( name ) === true ),
+		limits: {
+			maxBufferSize: limits?.maxBufferSize ?? 0,
+			maxStorageBufferBindingSize: limits?.maxStorageBufferBindingSize ?? 0,
+			maxTextureDimension2D: limits?.maxTextureDimension2D ?? 0
+		},
+		...(vendor ? { vendor } : {}),
+		...(architecture ? { architecture } : {})
+	};
+}
 
 /*
 ================
@@ -87,6 +115,8 @@ export function createDevice( timingEnabled = false, gpuAnimationEnabled = true 
 		failure = String( error );
 		phase = "failed";
 	};
+	// The adapter's features and limits for bug reports (gpuFacts above).
+	let facts: GpuFacts | null = null;
 	if ( !navigator.gpu ) {
 		fail( "WebGPU is unavailable" );
 	} else {
@@ -97,6 +127,7 @@ export function createDevice( timingEnabled = false, gpuAnimationEnabled = true 
 			if ( !adapter ) {
 				throw new Error( "No WebGPU adapter" );
 			}
+			facts = gpuFacts( adapter );
 			const requiredFeatures: GPUFeatureName[] = [];
 			if ( adapter.features.has( "texture-compression-bc" ) ) requiredFeatures.push( "texture-compression-bc" );
 			if ( timingEnabled && adapter.features.has( "timestamp-query" ) ) {
@@ -711,6 +742,12 @@ export function createDevice( timingEnabled = false, gpuAnimationEnabled = true 
 		================
 		*/
 		gpuTiming: () => timing?.stats() ?? null,
+		/*
+		================
+		adapterFacts
+		================
+		*/
+		adapterFacts: () => facts,
 		/*
 		================
 		commands
