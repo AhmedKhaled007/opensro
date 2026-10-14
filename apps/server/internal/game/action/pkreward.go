@@ -64,6 +64,12 @@ type playerKill struct {
 	legalEnemy  bool
 	enemyRules  playerEnemyRules
 	victimLevel int64
+	// Port-only, not native (mostwanted.go): whether killer and victim are
+	// strangers (no shared account, party, guild or union), which both the
+	// streak count and the bounty require, and the victim's wanted level
+	// before its death cleared it.
+	mostWantedStrangers bool
+	victimWanted        int64
 }
 
 /*
@@ -89,6 +95,7 @@ can persist while holding their own mutex. withVictim refreshes local facts.
 func (rt *Runtime) classifyPlayerKill(division string, killer, victim *enterworld.Character) playerKill {
 	kind := rt.deathKind(division, victim, rt.prepareDeathKiller(division, victim, deathKiller{player: killer}))
 	kill := playerKill{kind: kind, enemyRules: rt.worldPlayerEnemyRules(division, killer, victim)}
+	kill.mostWantedStrangers = rt.mostWantedStrangers(division, killer, victim)
 	return kill.withVictim(killer, victim)
 }
 
@@ -103,6 +110,7 @@ func (kill playerKill) withVictim(killer, victim *enterworld.Character) playerKi
 	kill.murderer = murderer(victim) && kill.kind != pk.DeathGuildWar
 	kill.legalEnemy = kill.enemyRules.enemy(killer, victim)
 	kill.victimLevel = rewardLevel(victim)
+	kill.victimWanted = mostWantedLevel(victim)
 	return kill
 }
 
@@ -179,6 +187,9 @@ func (rt *Runtime) payPlayerKillInDoor(division string, killer, victim *enterwor
 			public = append(public, wire.ProgressionBroadcastFrames(frames)...)
 		}
 	}
+	// Port-only, not native: the streak's count and the bounty (mostwanted.go).
+	wantedActor, wantedPublic := rt.mostWantedKillInDoor(division, killer, victim, kill, now)
+	actor, public = append(actor, wantedActor...), append(public, wantedPublic...)
 	return actor, public, after
 }
 
