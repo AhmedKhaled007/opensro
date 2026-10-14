@@ -186,6 +186,11 @@ export const EXPERIMENTAL_TABS: readonly {
 			id: "experimental-developer-diagnostics",
 			label: "Developer diagnostics",
 			description: "Show a diagnostics icon beside FPS."
+		}, {
+			key: "fitWindowLabels",
+			id: "experimental-fit-window-labels",
+			label: "Fit window labels",
+			description: "Wrap a label wider than its box; open a list upward inside its window."
 		} ]
 	}
 ];
