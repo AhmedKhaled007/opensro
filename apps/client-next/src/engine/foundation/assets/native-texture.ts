@@ -11,6 +11,7 @@ The format rules also serve CPU residency accounting and input validation.
 ===========================================================================
 */
 import type { NativeTexture } from "@/engine/contracts/texture";
+import type { TextureFeature } from "./texture-variants";
 
 const NTX_MAGIC = 0x3158544e;
 const HEADER_BYTES = 20;
@@ -24,6 +25,14 @@ const D3DFMT_BGRA = 21;
 const D3DFMT_DXT1 = 0x31545844;
 const D3DFMT_DXT3 = 0x33545844;
 const D3DFMT_DXT5 = 0x35545844;
+// Port-only variant codes (four ASCII characters, little-endian): the
+// asset build's re-encodings for devices without BC (texture-variants.ts).
+const NTX_ETC2_RGB8A1 = 0x31413245; // "E2A1"
+const NTX_ETC2_RGBA8 = 0x38413245; // "E2A8"
+const NTX_ASTC_4X4 = 0x34345341; // "AS44"
+// A variant's optional trailing picking mask: this tag, then width x height
+// alpha bytes of level 0 (NativeTexture.pickAlpha).
+const NTX_PICK_ALPHA = 0x38414b50; // "PKA8"
 
 export const NATIVE_TEXTURE_MIME = "application/x-sro-texture";
 
@@ -37,9 +46,28 @@ including mip levels whose logical dimensions are smaller than one block.
 */
 export function nativeTextureBlockBytes( format: NativeTexture["format"] ): number {
 	if ( format === "bgra8unorm" ) return 0;
-	if ( format === "bc1-rgba-unorm" ) return COLOR_BLOCK_BYTES;
-	if ( format === "bc2-rgba-unorm" || format === "bc3-rgba-unorm" ) return ALPHA_BLOCK_BYTES;
+	if ( format === "bc1-rgba-unorm" || format === "etc2-rgb8a1unorm" ) return COLOR_BLOCK_BYTES;
+	if (
+		format === "bc2-rgba-unorm" || format === "bc3-rgba-unorm" || format === "etc2-rgba8unorm" ||
+		format === "astc-4x4-unorm"
+	) return ALPHA_BLOCK_BYTES;
 	throw Error( "Unsupported native texture format" );
+}
+
+/*
+================
+nativeTextureFeature
+
+The WebGPU feature a compressed format needs, or null for BGRA. Only BC
+levels have a CPU fallback (decodeNativeSurface); a variant format is
+served only to a device that has its feature.
+================
+*/
+export function nativeTextureFeature( format: NativeTexture["format"] ): TextureFeature | null {
+	if ( format === "bgra8unorm" ) return null;
+	if ( format === "etc2-rgb8a1unorm" || format === "etc2-rgba8unorm" ) return "texture-compression-etc2";
+	if ( format === "astc-4x4-unorm" ) return "texture-compression-astc";
+	return "texture-compression-bc";
 }
 
 /*
@@ -89,8 +117,27 @@ export function validateNativeTexture( texture: NativeTexture ): number {
 		}
 		bytes += expected;
 	}
+	if ( texture.pickAlpha !== undefined ) {
+		if ( !(texture.pickAlpha instanceof Uint8Array) || texture.pickAlpha.byteLength !== width * height ) {
+			throw Error( "Invalid native texture picking mask" );
+		}
+		bytes += width * height;
+	}
 	if ( bytes > MAX_TEXTURE_BYTES ) throw Error( "Native texture exceeds byte budget" );
 	return bytes;
+}
+
+/*
+================
+nativeTextureDecodable
+
+Whether the CPU can decode a format: the retail BC formats and BGRA can,
+the port-only variants cannot (a device is served one only where its GPU
+samples it, and picking reads the variant's own mask).
+================
+*/
+export function nativeTextureDecodable( format: NativeTexture["format"] ): boolean {
+	return format === "bgra8unorm" || nativeTextureFeature( format ) === "texture-compression-bc";
 }
 
 /*
@@ -117,6 +164,12 @@ export function decodeNativeTexture( bytes: Uint8Array ): NativeTexture {
 		"bc2-rgba-unorm" :
 		code === D3DFMT_DXT5 ?
 		"bc3-rgba-unorm" :
+		code === NTX_ETC2_RGB8A1 ?
+		"etc2-rgb8a1unorm" :
+		code === NTX_ETC2_RGBA8 ?
+		"etc2-rgba8unorm" :
+		code === NTX_ASTC_4X4 ?
+		"astc-4x4-unorm" :
 		(() => {
 			throw Error( "Unsupported native texture format" );
 		})();
@@ -135,8 +188,16 @@ export function decodeNativeTexture( bytes: Uint8Array ): NativeTexture {
 		levels.push( bytes.slice( offset, offset + size ) );
 		offset += size;
 	}
-	if ( offset !== bytes.byteLength ) throw Error( "Invalid native texture extent" );
-	return { kind: "native-texture", width, height, format, levels };
+	if ( offset === bytes.byteLength ) return { kind: "native-texture", width, height, format, levels };
+	// Only a variant, which has no CPU decoder, carries its picking mask.
+	if (
+		nativeTextureDecodable( format ) || bytes.byteLength - offset !== 4 + width * height ||
+		view.getUint32( offset, true ) !== NTX_PICK_ALPHA
+	) {
+		throw Error( "Invalid native texture extent" );
+	}
+	const pickAlpha = bytes.slice( offset + 4 );
+	return { kind: "native-texture", width, height, format, levels, pickAlpha };
 }
 
 /*
@@ -230,6 +291,10 @@ export function decodeNativeSurface( surface: {
 		bytes.byteLength !== nativeTextureLevelBytes( format, width, height )
 	) {
 		throw Error( "Invalid native surface dimensions or payload" );
+	}
+	// Variants are served only to a device that samples them (texture-variants.ts).
+	if ( !nativeTextureDecodable( format ) ) {
+		throw Error( `No CPU decoder for ${format}` );
 	}
 	const result = new Uint8Array( width * height * CHANNELS );
 	if ( format === "bgra8unorm" ) {
