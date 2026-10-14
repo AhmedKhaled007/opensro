@@ -193,6 +193,8 @@ presentShop
 		}
 		return shopPresentation;
 	}
+	// The presented bag (bag()). Every writer of slots clears it: the next
+	// read builds a new array, which is how gameplay's journal sees a change.
 	let published: readonly InventoryItem[] | null = null;
 	// One-shot slot flashes the 0x3645 item-state (7654B0) and 0x31E8 durability
 	// (77C300) updates raised; each lasts under 1.3 s, so older entries are
@@ -252,6 +254,17 @@ present
 		}) );
 		gachaRows = { iconCount: icons.size, rows };
 		return rows;
+	}
+	/*
+================
+bag
+
+The presented bag rows, rebuilt only after a writer cleared them: every
+change to the bag yields a new array (gameplay's journal compares it).
+================
+	*/
+	function bag(): readonly InventoryItem[] {
+		return published ?? (published = [ ...slots.values() ].map( present ));
 	}
 	let inventorySlotCount: number | undefined, equipmentSlotCount: number | undefined;
 	/*
@@ -2077,6 +2090,7 @@ step
 			}
 			return unlocked || expired || rentalUpdates.length > 0;
 		},
+		bag,
 		/*
 ================
 state
@@ -2111,7 +2125,7 @@ state
 				shopCompletionRevision,
 				inventorySlotCount,
 				equipmentSlotCount,
-				inventory: published ?? (published = [ ...slots.values() ].map( present )),
+				inventory: bag(),
 				itemFlashes,
 				inventoryPending: busy(),
 				error
