@@ -1,27 +1,28 @@
 /*
 ===========================================================================
 
-gacha.ts - the Magic Pop window session and roll lifecycle
+gacha.ts - the Magic Pang window session and roll lifecycle
 
 Owns opening, ticket selection, roll timing and result sounds. Shared NPC
-acknowledgements are validated before the Magic Pop service is selected.
+acknowledgements are validated before the Magic Pang service is selected.
 
 ===========================================================================
 */
 import { gachaPrizes, isGachaTicket } from "@/engine/foundation/gameplay/gacha-catalog";
+import { GACHA_FUNCTION, GACHA_ROLL_MS } from "@/engine/foundation/ui/gacha-window";
 import { npcInteractionMask } from "@/engine/foundation/gameplay/npc-dialogue";
 import type { GachaState } from "@/engine/contracts/item-process";
 import type { InventoryItem } from "@/engine/contracts/gameplay";
 import type { UiSoundHandle } from "@/engine/foundation/ui/sound-catalog";
-const GACHA_FUNCTION = 0x10000;
 const OP_NPC_ACTION = 0x7338;
 const OP_GACHA_ROLL = 0x7053;
-const ROLL_DURATION_MS = 4000;
+const OP_GACHA_EXCHANGE = 0x71be;
 const FIRST_BAG_SLOT = 13;
 const MAX_SLOT = 255;
 const MAX_GID = 0xffffffff;
 const LOW_WORD_MASK = 0xffffffffn;
 const NPC_REQUEST_BYTES = 8;
+const EXCHANGE_REQUEST_BYTES = 4;
 const ROLL_REQUEST_BYTES = 9;
 
 /*
@@ -50,12 +51,27 @@ export function createGacha() {
 			if (
 				!Number.isInteger( gid ) || gid <= 0 || gid > MAX_GID || state.phase === "rolling" ||
 				state.phase === "waiting"
-			) throw Error( "Magic Pop unavailable" );
+			) throw Error( "Magic Pang unavailable" );
 			const payload = new Uint8Array( NPC_REQUEST_BYTES ), v = new DataView( payload.buffer );
 			v.setUint32( 0, gid, true );
 			v.setUint32( 4, GACHA_FUNCTION, true );
 			state = { ...state, phase: "opening", npc: gid, error: null };
 			return { opcode: OP_NPC_ACTION, payload };
+		},
+		/*
+		================
+		exchange
+
+		5DB67B: the operator row sends its NPC gid once 642270 found a voucher.
+		================
+		*/
+		exchange( gid: number ) {
+			if ( !Number.isInteger( gid ) || gid <= 0 || gid > MAX_GID ) {
+				throw Error( "Magic Pang exchange unavailable" );
+			}
+			const payload = new Uint8Array( EXCHANGE_REQUEST_BYTES );
+			new DataView( payload.buffer ).setUint32( 0, gid, true );
+			return { opcode: OP_GACHA_EXCHANGE, payload };
 		},
 		/*
 		================
@@ -99,7 +115,7 @@ export function createGacha() {
 				!gachaPrizes().some( prize => prize.entry === entry ) || !item || slot < FIRST_BAG_SLOT ||
 				slot > MAX_SLOT || item.slot !== slot || item.quantity <= 0 ||
 				!isGachaTicket( flags )
-			) throw Error( "Magic Pop roll unavailable" );
+			) throw Error( "Magic Pang roll unavailable" );
 			state = {
 				...state,
 				phase: "rolling",
@@ -118,7 +134,7 @@ export function createGacha() {
 		================
 		*/
 		step( now: number, item: InventoryItem | undefined ) {
-			if ( state.phase !== "rolling" || now - state.started < ROLL_DURATION_MS ) return null;
+			if ( state.phase !== "rolling" || now - state.started < GACHA_ROLL_MS ) return null;
 			if ( !item || item.slot !== state.slot || item.quantity <= 0 || !isGachaTicket( item.typeFlags ) ) {
 				state = { ...state, phase: "idle", slot: null };
 				return null;
@@ -136,7 +152,7 @@ export function createGacha() {
 		================
 		*/
 		result( p: Uint8Array, item: InventoryItem | undefined ): readonly UiSoundHandle[] {
-			if ( p.length !== 2 ) throw Error( "Invalid Magic Pop result" );
+			if ( p.length !== 2 ) throw Error( "Invalid Magic Pang result" );
 			// 766A4E jumps directly to the system-notice dispatcher on failure;
 			// it never calls CIFGhaCha_ApplyResult, so no result presentation.
 			// Port-only, not native: native strands the busy byte 0xCEA7C4 that

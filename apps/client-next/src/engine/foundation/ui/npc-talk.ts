@@ -123,6 +123,10 @@ export interface NpcTalkInput {
 	readonly canStorage?: boolean;
 	// canMagicOption is the smith's row 0x2F (capability 0x80000000).
 	readonly canMagicOption?: boolean;
+	// canGacha is row 0x27 (5D9737, mask 0x10000): the Magic Pang machine's game row.
+	readonly canGacha?: boolean;
+	// canGachaOperator is row 0x28 (5D9750, mask 0x20000): Gori's voucher exchange.
+	readonly canGachaOperator?: boolean;
 	readonly canReverseReturn?: boolean;
 	// 5D8FF0 0x800000: the fortress official's application row.
 	readonly canFortressOfficial?: boolean;
@@ -240,6 +244,14 @@ export function npcTalkLayout( input: NpcTalkInput ) {
 						[]),
 					...(input.canFortressTrainer ?
 						[ { id: "npc-fortress-production:trainer", label: copy( "UIIT_STT_FORT_ETC_TRAINING" ) } ] :
+						[]),
+					// 5D9100 adds row 0x27 after the fortress rows; 5D6E92 labels it.
+					...(input.canGacha ?
+						[ { id: "gacha-open", label: copy( "SN_TALK_CH_GACHA_MACHINE_2" ) } ] :
+						[]),
+					// 5D9750 adds row 0x28 straight after row 0x27.
+					...(input.canGachaOperator ?
+						[ { id: "gacha-exchange", label: copy( "SN_TALK_CH_GACHA_OPERATOR_2" ) } ] :
 						[])
 				]),
 			{ id: "npc-talkend", label: copy( "UIIT_STT_NPC_CHATTING_WND_TALKEND" ) }

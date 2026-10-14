@@ -23,6 +23,7 @@ export type ItemProcessCommand =
 		readonly quantity?: number;
 	}
 	| { readonly kind: "gacha-open"; readonly gid: number; }
+	| { readonly kind: "gacha-exchange"; readonly gid: number; }
 	| { readonly kind: "gacha-close"; }
 	| { readonly kind: "gacha-roll"; readonly entry: number; readonly slot: number; }
 	| { readonly kind: "magic-option-open"; readonly gid: number; }
@@ -77,6 +78,21 @@ export interface AlchemyOutcome {
 GachaState
 ================
 */
+/*
+================
+GachaPrizeRow
+
+One of the twelve lottery rows (gachaitemset set 1) with its reference icon.
+================
+*/
+export interface GachaPrizeRow {
+	readonly entry: number;
+	readonly refObjId: number;
+	readonly quantity: number;
+	readonly nameSymbol: string;
+	readonly icon?: string;
+}
+
 export interface GachaState {
 	readonly visible: boolean;
 	readonly phase: "closed" | "opening" | "idle" | "rolling" | "waiting" | "result";
@@ -87,6 +103,7 @@ export interface GachaState {
 	readonly result: "win" | "lose" | null;
 	readonly reward?: { readonly refObjId: number; readonly quantity: number; };
 	readonly error: number | null;
+	readonly prizes?: readonly GachaPrizeRow[];
 }
 
 /*

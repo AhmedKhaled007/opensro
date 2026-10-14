@@ -211,7 +211,7 @@ test("native single-selection compound and dissolution requests retain their dis
 	a.compound( true, 2 );
 	assert.deepEqual( [ ...a.start( "dissolve", [ 13 ], items, 2000, 1 ).payload ], [ 1, 13, 12 ] );
 });
-test("Magic Pop timers send exactly once and native result cards gate the win cue", () => {
+test("Magic Pang timers send exactly once and native result cards gate the win cue", () => {
 	const { owner, sounds, frames } = setup();
 	open( owner );
 	owner.process( { kind: "gacha-roll", entry: 1, slot: 14 }, 100 );
@@ -242,7 +242,7 @@ test("Magic Pop timers send exactly once and native result cards gate the win cu
 	assert.equal( sounds.at( -1 ), "SND_GACHA_WIN" );
 	assert.deepEqual( owner.state().gacha.reward, { refObjId: 4140, quantity: 1 } );
 });
-test("Magic Pop loss, failed opening, card invalidation and reset do not invent cues", () => {
+test("Magic Pang loss, failed opening, card invalidation and reset do not invent cues", () => {
 	const { owner, sounds, frames } = setup();
 	assert.equal( owner.receive( 0xb338, Uint8Array.of( 1, 1, 0, 0, 0 ) ), false );
 	open( owner );
@@ -264,7 +264,7 @@ test("Magic Pop loss, failed opening, card invalidation and reset do not invent 
 
 /*
 ================
-Magic Pop refusal
+Magic Pang refusal
 
 766A4E sends a refusal straight to the notice dispatcher: no result
 presentation, no cue, the bag untouched. Port-only, not native: native
@@ -272,7 +272,7 @@ leaves its busy byte set and the window cannot close; a refused roll
 returns the window to idle, so it closes and rolls again.
 ================
 */
-test("a refused Magic Pop roll presents no result and leaves the window idle", () => {
+test("a refused Magic Pang roll presents no result and leaves the window idle", () => {
 	for ( const flag of [ 0, 2, 255 ] ) {
 		const { owner, sounds, frames } = setup();
 		open( owner );
@@ -291,7 +291,7 @@ test("a refused Magic Pop roll presents no result and leaves the window idle", (
 	}
 });
 
-test("after a refused Magic Pop roll the window closes", () => {
+test("after a refused Magic Pang roll the window closes", () => {
 	const { owner } = setup();
 	open( owner );
 	owner.process( { kind: "gacha-roll", entry: 1, slot: 14 }, 0 );
@@ -304,7 +304,7 @@ test("after a refused Magic Pop roll the window closes", () => {
 	assert.equal( owner.state().gacha.phase, "closed" );
 });
 
-test("a Magic Pop roll never holds the bag, as native CIFInventory is never blocked by it", () => {
+test("a Magic Pang roll never holds the bag, as native CIFInventory is never blocked by it", () => {
 	const { owner, frames } = setup();
 	open( owner );
 	owner.process( { kind: "gacha-roll", entry: 1, slot: 14 }, 0 );
@@ -398,4 +398,40 @@ test("62B0B0 words the outcome and plays its effect once", () => {
 	assert.deepEqual( result.alchemyEffectCell( 5 * 50 ), [ .25, .25, .25, .25 ] );
 	assert.deepEqual( result.alchemyEffectCell( 15 * 50 + 49 ), [ .75, .75, .25, .25 ] );
 	assert.equal( result.alchemyEffectCell( 16 * 50 ), null );
+});
+
+test("Gori's exchange request carries the operator's gid, and a voucher update words the chat line from its recorded reward", () => {
+	const frames = [], owner = createInventory( f => frames.push( f ), () => {} );
+	owner.bootstrap( {
+		refItemSnapshot: [
+			{ refObjId: 2, typeFlags: 0xf6c },
+			{ refObjId: 3, typeFlags: 0x176c },
+			{ refObjId: 4140, typeFlags: 0x2c, name: "Rare Spear" }
+		],
+		equipItems: [ { slot: 14, refObjId: 2, body: [ 2, 0, 0, 0, 1, 0 ] } ]
+	} );
+	const request = owner.process( { kind: "gacha-exchange", gid: 7 }, 0 );
+	assert.equal( request.opcode, 0x71be );
+	assert.deepEqual( [ ...request.payload ], [ 7, 0, 0, 0 ] );
+	assert.deepEqual( [ ...frames.at( -1 ).payload ], [ 7, 0, 0, 0 ] );
+	assert.throws( () => owner.process( { kind: "gacha-exchange", gid: 0 }, 0 ), /unavailable/ );
+	// The roll turns the ticket into a voucher; the ticket is not a voucher, so no line yet.
+	const delta = Buffer.alloc( 23 );
+	delta[0] = 14;
+	delta[1] = 0x21;
+	delta.writeUInt32LE( 3, 2 );
+	delta[6] = 2;
+	delta.writeBigUInt64LE( 4140n, 7 );
+	delta.writeBigUInt64LE( 1n, 15 );
+	owner.receive( 0x3645, delta );
+	assert.equal( owner.takeExchangeNotice(), null );
+	// The exchange empties the voucher by quantity, which is what 7654B0 words.
+	owner.receive( 0x3645, Uint8Array.of( 14, 8, 0, 0 ) );
+	assert.deepEqual( owner.takeExchangeNotice(), {
+		key: "UIIT_MSG_GACHA_EXCHANGE",
+		value: 1,
+		arguments: [ "Rare Spear" ],
+		formatKinds: [ "s", "d" ]
+	} );
+	assert.equal( owner.takeExchangeNotice(), null, "the line is raised once" );
 });

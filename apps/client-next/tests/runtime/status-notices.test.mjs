@@ -192,7 +192,7 @@ test("academy membership refusals retain authority and route every native error 
 	assert.equal( g.take(), null, "malformed packets must not dirty state" );
 });
 
-test("Magic Pop routes every non-success result through category 1 without mutating inventory", () => {
+test("Magic Pang routes every non-success result through category 1 without mutating inventory", () => {
 	const g = createGameplay( () => {} );
 	g.bootstrap( {} );
 	g.seed( { gid: 1, regionId: 25000, x: 0, y: 0, z: 0, heading: 0, countryByte9c: 0 } );

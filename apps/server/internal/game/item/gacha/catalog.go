@@ -343,3 +343,24 @@ func (c *Catalog) WastePrizeForNpc(npc uint32, sample uint32) (Prize, bool) {
 	}
 	return Prize{}, false
 }
+
+// IsResultCard reports whether the reference is a win or loss voucher, the two
+// rows the roll writes and the operator exchanges.
+func (c *Catalog) IsResultCard(refObjID uint32) bool {
+	return refObjID == c.WinCard.RefObjID || refObjID == c.LoseCard.RefObjID
+}
+
+// IsPrizePair reports whether a reward reference and quantity are an enabled
+// prize row. The roll writes only such pairs onto a voucher, so the exchange
+// refuses any other pair rather than mint whatever a row happens to carry.
+func (c *Catalog) IsPrizePair(rewardRefObjID uint32, quantity uint64) bool {
+	if c == nil {
+		return false
+	}
+	for _, prize := range c.prizesByEntry {
+		if prize.RewardRefObjID == rewardRefObjID && uint64(prize.Quantity) == quantity {
+			return true
+		}
+	}
+	return false
+}

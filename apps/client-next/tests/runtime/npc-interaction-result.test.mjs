@@ -4,7 +4,7 @@
 npc-interaction-result.test.mjs - shared NPC acknowledgement dispatch
 
 Exercises the server's six-byte special-trade acknowledgement through the
-inventory and gameplay owners, including pending avatar and Magic Pop windows.
+inventory and gameplay owners, including pending avatar and Magic Pang windows.
 Malformed packets must fail without changing either window's session.
 
 ===========================================================================

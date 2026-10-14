@@ -1087,7 +1087,7 @@ test("the player panel selects the local character and frames itself while selec
 	}
 });
 
-test("contextual Shop entry leaves Alchemy through the same lifecycle; locked Magic Pop rejects entry", () => {
+test("contextual Shop entry leaves Alchemy through the same lifecycle; locked Magic Pang rejects entry", () => {
 	const sent = [], f = uiFixture( c => sent.push( c ) );
 	try {
 		f.state.gameplay = { ...f.state.gameplay, target: 99 };
@@ -1105,7 +1105,7 @@ test("contextual Shop entry leaves Alchemy through the same lifecycle; locked Ma
 		f.state.gameplay = { ...f.state.gameplay, shop: { npc: 99, offers: [] }, shopCompletionRevision: 1 };
 		f.ui.step( f.state, 1250 );
 		assert.deepEqual( sent.map( c => c.command?.kind ), [ "alchemy-open", "shop-open", "alchemy-close" ] );
-		f.ui.event( { kind: "activate", id: "open-window:Magic Pop" } );
+		f.ui.event( { kind: "activate", id: "open-window:Magic Pang" } );
 		f.state.gameplay = { ...f.state.gameplay, gacha: { visible: true, phase: "rolling" } };
 		f.ui.step( f.state, 1300 );
 		sent.length = 0;

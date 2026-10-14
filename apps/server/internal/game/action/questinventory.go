@@ -47,6 +47,20 @@ func (rt *Runtime) PlanQuestInventory(c *enterworld.Character, consume, grant []
 			return nil, nil, fmt.Errorf("missing quest item %s", request.Codename)
 		}
 	}
+	return rt.planInventoryGrant(c, before, inv, grant, nil)
+}
+
+// planInventoryGrant adds grant to inv, already holding the caller's removals
+// from before, and plans the rows and frames for the whole change. A slot in
+// silent gets no delete frame: its caller announces the removal itself, as
+// the Gacha exchange does with a 0x3645 quantity of zero.
+func (rt *Runtime) planInventoryGrant(
+	c *enterworld.Character,
+	before []inventory.Item,
+	inv *inventory.Inventory,
+	grant []inventory.ItemAmount,
+	silent map[uint8]bool,
+) ([]enterworld.InventoryRow, []wire.Frame, error) {
 	for _, request := range grant {
 		if request.Count == 0 || request.Count > 65535 || rt.deps.ItemReferences() == nil {
 			return nil, nil, fmt.Errorf("invalid quest grant %s", request.Codename)
@@ -91,7 +105,7 @@ func (rt *Runtime) PlanQuestInventory(c *enterworld.Character, consume, grant []
 	for slot := inventory.EquipmentSlotEnd; slot < inventory.BagEnd(c); slot++ {
 		old, had := previous[slot]
 		row, has := next[slot]
-		if had && (!has || old.RefObjID != row.RefObjID || (!inventory.IsEtcStackableTypeFlags(row.TypeFlags) && !reflect.DeepEqual(old, row))) {
+		if had && !silent[slot] && (!has || old.RefObjID != row.RefObjID || (!inventory.IsEtcStackableTypeFlags(row.TypeFlags) && !reflect.DeepEqual(old, row))) {
 			frames = append(frames, wire.Frame{Opcode: wire.OpItemMoveResponse, Payload: []byte{1, 15, slot, 0}})
 		}
 		if has && (!had || !reflect.DeepEqual(old, row)) {

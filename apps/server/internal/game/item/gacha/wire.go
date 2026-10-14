@@ -18,6 +18,8 @@ const (
 	OpItemStateDelta uint16 = 0x3645
 	// OpResult is CNetProcessSecond_OnPacket_B053's two-byte result.
 	OpResult uint16 = 0xB053
+	// OpExchange is CIFNPCTalk's operator row (5DB67B): the bound operator NPC's gid.
+	OpExchange uint16 = 0x71BE
 
 	InteractionFlagGacha uint32 = 0x10000
 	ResultLose           uint8  = 0
@@ -45,6 +47,16 @@ func DecodeRollRequest(payload []byte) (RollRequest, error) {
 		return out, err
 	}
 	return out, reader.Done()
+}
+
+// DecodeExchangeRequest reads 0x71BE [boundNpcGid:u32].
+func DecodeExchangeRequest(payload []byte) (uint32, error) {
+	reader := wire.NewReader(payload)
+	gid, err := reader.U32()
+	if err != nil {
+		return 0, err
+	}
+	return gid, reader.Done()
 }
 
 // DecodeNpcAction reads the generic 0x7338 [boundNpcGid:u32][actionFlags:u32].

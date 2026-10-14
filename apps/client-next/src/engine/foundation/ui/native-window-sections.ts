@@ -19,6 +19,8 @@ owners admit only the sections their native constructor creates together.
 */
 export function nativeWindowSections( name: string ): readonly string[] | undefined {
 	switch ( name ) {
+		case "ifghacha":
+			return [ "Create", "Inventory" ]; // 6450F0 builds Create, then Inventory.
 		case "ifitemmall":
 			return [ "Create", "ShopList", "MyInfo", "Trunk" ]; // 6BBFA0.
 		case "ifitemmallshop":

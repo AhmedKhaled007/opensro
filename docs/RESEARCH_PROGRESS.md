@@ -182,3 +182,13 @@ tool's help and current paths first. Old notes may reference removed
 `reconstruct/` paths. Those private tools and decompiler dumps are not shipped
 with a public clone and are not prerequisites for the Python tutorial. An ignored
 overlay database alone must never be the only copy of label work.
+
+## Worked example: CIFGhaCha (the Magic Pang window)
+
+A finished investigation that follows this layout lives in the owner's research tree under
+`targets/f6580bf65213c0c074efe312514c55c73040667e7a9ad1aae9b8595d48ccd3a2/` (client v1.150 as supplied
+by the maintainer; the repository's other fixtures pin `375e8682...`, so check the hash before
+reusing an address). It holds `manifest.json`, one label record per function RVA, and notes
+(`cifghacha-overview.md`, `cifghacha-behaviour.md`) that separate checked claims from inferences.
+A finding worth repeating: the window's controls are authored data (`resinfo\ifghacha.txt`), not
+code-only, so read the resource files before assuming a window builds itself in code.

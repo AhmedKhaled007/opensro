@@ -61,7 +61,8 @@ no bit in the v1.150 word.
 func TestTalkWordShiftsEachOptionBelowItsNumber(t *testing.T) {
 	for option, want := range map[uint8]uint32{
 		NpcServiceShop: 0x1, NpcServiceStorage: 0x4, NpcServiceGuild: 0x4000, NpcServiceGachaMachine: 0x10000,
-		NpcServiceJobTrader: 0x80000, NpcServiceJobHunter: 0x200000, NpcServiceTeleportGate: 0x8000000,
+		NpcServiceGachaOperator: 0x20000,
+		NpcServiceJobTrader:     0x80000, NpcServiceJobHunter: 0x200000, NpcServiceTeleportGate: 0x8000000,
 		NpcServiceReverseReturn: 0x20000000, NpcServiceGatePulley: 0x40000000, NpcServiceMagicOption: 0x80000000,
 		NpcServiceArenaManager: 0,
 	} {
@@ -148,5 +149,26 @@ func TestTownSpecialtyTradersSellTradeGoods(t *testing.T) {
 		if got := ResolveNpcTalkFlags(npc); got != NpcTalkFlagShop|NpcTalkFlagSpecialTrade {
 			t.Errorf("%s resolves %#x, want shop|special trade", codename, got)
 		}
+	}
+}
+
+/*
+================
+TestGachaOperatorAdvertisesTheExchangeRow
+
+Gori (NPC_CH_GACHA_OPERATOR) offers the voucher exchange, row 0x28, and nothing
+else; the machine's row 0x27 stays with the machine.
+================
+*/
+func TestGachaOperatorAdvertisesTheExchangeRow(t *testing.T) {
+	operator := NpcDef{Codename: "NPC_CH_GACHA_OPERATOR"}
+	operator.Services = ResolveNpcServices(operator)
+	if got := ResolveNpcTalkFlags(operator); got != NpcTalkFlagGachaOperator {
+		t.Fatalf("operator flags %#x, want %#x", got, NpcTalkFlagGachaOperator)
+	}
+	machine := NpcDef{Codename: "NPC_CH_GACHA_MACHINE"}
+	machine.Services = ResolveNpcServices(machine)
+	if got := ResolveNpcTalkFlags(machine); got != NpcTalkFlagGachaMachine {
+		t.Fatalf("machine flags %#x, want %#x", got, NpcTalkFlagGachaMachine)
 	}
 }

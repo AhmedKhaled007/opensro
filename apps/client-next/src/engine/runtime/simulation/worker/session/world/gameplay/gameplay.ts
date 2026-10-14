@@ -1868,10 +1868,15 @@ state here before a command can claim a native wire conversation.
 			) {
 				if ( !localGid ) throw Error( "Local player is not initialized" );
 				if (
+					command.kind === "gacha-exchange" &&
+					(!entity || entity.kind !== "npc" || entity.refObjId !== 9252 ||
+						targeting.state().target !== command.gid || targeting.state().targetPending)
+				) throw Error( "Select the exchange operator" );
+				if (
 					command.kind === "gacha-open" &&
 					(!entity || entity.kind !== "npc" || entity.refObjId !== 9251 ||
 						targeting.state().target !== command.gid || targeting.state().targetPending)
-				) throw Error( "Select the Magic Pop NPC" );
+				) throw Error( "Select the Magic Pang NPC" );
 				// Row 0x2F exists only on a selected smith (0x80000000).
 				if (
 					command.kind === "magic-option-open" &&
@@ -3821,6 +3826,8 @@ Packet handling must not depend on which HUD panel is currently open.
 					alchemyNotice( frame.opcode, frame.payload ) ??
 					skillNotice( frame.opcode, frame.payload, localCountry, fortressActive( fortress ) );
 				if ( refusal ) notices = [ ...notices.slice( -99 ), { ...refusal, sequence: ++noticeSequence } ];
+				const exchanged = inventory.takeExchangeNotice();
+				if ( exchanged ) notices = [ ...notices.slice( -99 ), { ...exchanged, sequence: ++noticeSequence } ];
 				if ( target ) {
 					const selection = targeting.state();
 					if (

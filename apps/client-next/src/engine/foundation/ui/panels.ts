@@ -41,7 +41,7 @@ export function uiPanels() {
 		"Guild tools",
 		"Inventory",
 		"Job ranking",
-		"Magic Pop",
+		"Magic Pang",
 		"Magic option",
 		"Map",
 		"Option",

@@ -49,11 +49,14 @@ import {
 import { createAlchemy } from "./alchemy/alchemy";
 import { REPAIR_ONE_SLOT, REPAIR_RESPONSE_OPCODE, repairRequest } from "@/engine/foundation/gameplay/repair";
 import { createGacha } from "./gacha/gacha";
+import { gachaPrizes } from "@/engine/foundation/gameplay/gacha-catalog";
+import { isGachaVoucher } from "@/engine/foundation/ui/gacha-window";
+import type { SystemNotice } from "@/engine/foundation/gameplay/system-notices";
 import { createMagicOptionGrant } from "./magic-option/magic-option";
 import { itemStateDelta } from "@/engine/foundation/gameplay/item-state-delta";
 import { itemSlotFlashKinds } from "@/engine/foundation/ui/item-slot-effects";
 import { itemMagicDefinitions } from "@/engine/foundation/ui/item-tooltip-magic";
-import type { ItemProcessCommand } from "@/engine/contracts/item-process";
+import type { GachaPrizeRow, ItemProcessCommand } from "@/engine/contracts/item-process";
 import {
 	saleResult,
 	soldInventory,
@@ -205,6 +208,10 @@ presentShop
 	const refs = new Map<number, number>(), names = new Map<number, string>();
 	const icons = new Map<number, string>();
 	const tooltipRefs = new Map<number, ItemTooltipReference>();
+	// The Magic Pang window's twelve prizes with the reference icons, rebuilt when icons arrive.
+	let gachaRows: { iconCount: number; rows: readonly GachaPrizeRow[]; } | null = null;
+	// The chat line a voucher update raises, taken by the gameplay owner after each packet.
+	let exchangeNotice: SystemNotice | null = null;
 	let magicRefs = itemMagicReferences( undefined );
 	let presentations = new WeakMap<InventoryItem, InventoryItem>();
 	/*
@@ -225,6 +232,26 @@ present
 		};
 		presentations.set( item, result );
 		return result;
+	}
+	/*
+	================
+	gachaPrizeRows
+
+	The Magic Pang prizes with reference icons. Icons arrive after the first frame, so
+	the cached rows are rebuilt when the icon table has grown.
+	================
+	*/
+	function gachaPrizeRows(): readonly GachaPrizeRow[] {
+		if ( gachaRows?.iconCount === icons.size ) return gachaRows.rows;
+		const rows = gachaPrizes().map( prize => ({
+			entry: prize.entry,
+			refObjId: prize.refObjId,
+			quantity: prize.quantity,
+			nameSymbol: prize.nameSymbol,
+			icon: icons.get( prize.refObjId )
+		}) );
+		gachaRows = { iconCount: icons.size, rows };
+		return rows;
 	}
 	let inventorySlotCount: number | undefined, equipmentSlotCount: number | undefined;
 	/*
@@ -345,8 +372,8 @@ timeoutMessage
 ================
 busy
 
-A Magic Pop roll does not hold the bag: native reads its busy byte only
-for the Magic Pop window's own slot (CIFItemSlot_DispatchActivation
+A Magic Pang roll does not hold the bag: native reads its busy byte only
+for the Magic Pang window's own slot (CIFItemSlot_DispatchActivation
 567520..567535, message 0x8C), never for CIFInventory.
 ================
 	*/
@@ -487,6 +514,18 @@ pet record names, for decoders of rows held elsewhere (the storage room).
 		*/
 		objectRefs(): ReadonlyMap<number, number> {
 			return objRefs;
+		},
+		/*
+================
+takeExchangeNotice
+
+The exchange line the last 0x3645 raised, once.
+================
+		*/
+		takeExchangeNotice(): SystemNotice | null {
+			const notice = exchangeNotice;
+			exchangeNotice = null;
+			return notice;
 		},
 		/*
 ================
@@ -769,6 +808,11 @@ exchangeCommand
 					play( cue );
 				}
 				return null;
+			}
+			if ( command.kind === "gacha-exchange" ) {
+				const exchange = gacha.exchange( command.gid );
+				send( exchange );
+				return exchange;
 			}
 			const frame = command.kind === "gacha-open" ?
 				gacha.open( command.gid ) :
@@ -1503,6 +1547,17 @@ receive
 			}
 			if ( op === 0x3645 ) {
 				const before = slots.get( p[0]! ), next = itemStateDelta( p, slots, refs, names );
+				// 7654B0 words UIIT_MSG_GACHA_EXCHANGE from the voucher the update hits: its recorded
+				// reference and quantity.
+				if ( before && isGachaVoucher( before.typeFlags ) && before.magic.length === 2 ) {
+					const reward = Number( BigInt( before.magic[0]! ) & 0xffffffffn );
+					exchangeNotice = {
+						key: "UIIT_MSG_GACHA_EXCHANGE",
+						value: Number( BigInt( before.magic[1]! ) & 0xffffffffn ),
+						arguments: [ names.get( reward ) ?? "" ],
+						formatKinds: [ "s", "d" ]
+					};
+				}
 				const kinds = itemSlotFlashKinds( p[1]!, before?.summon?.state, next.item?.summon?.state );
 				if ( kinds.length ) {
 					itemFlashes = [
@@ -2033,7 +2088,7 @@ state
 				itemCooldowns,
 				avatarInventory: [ ...avatars.values() ].map( present ),
 				alchemy: alchemy.state(),
-				gacha: gacha.state(),
+				gacha: { ...gacha.state(), prizes: gachaPrizeRows() },
 				exchange: exchange.open || exchange.requesting ?
 					{
 						...exchange,

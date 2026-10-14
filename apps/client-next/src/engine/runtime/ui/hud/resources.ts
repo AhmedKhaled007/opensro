@@ -161,6 +161,7 @@ export function createHudResources(
 		"ifguildwarconfirm",
 		"ifguildwaragree",
 		"ifexchange",
+		"ifghacha",
 		"ifstall",
 		"ifchatmodule",
 		"ifstallslot",

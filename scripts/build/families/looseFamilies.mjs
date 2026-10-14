@@ -385,6 +385,15 @@ async function produceOverlays() {
 		{
 			folder: "/assets/images/Media_extracted/interface/ifcommon/",
 			keep: file => file.startsWith( "quickparty_move_" ) || file.startsWith( "com_kindred_" )
+		},
+		{
+			// CIFGhaCha's OnTimer 643070 names these in code, not in ifghacha.txt: the reel frames
+			// (gacha_roll%04d), the effect frames (ga_effect_%02d) and the success sheet. ga_effect_01
+			// is in the layout, so the layout publisher already owns it.
+			folder: "/assets/images/Media_extracted/interface/game/",
+			keep: file =>
+				file.startsWith( "gacha_roll" ) || file.startsWith( "ga_effect_sucess" ) ||
+				(file.startsWith( "ga_effect_" ) && file !== "ga_effect_01.png")
 		}
 	];
 	const files = [];

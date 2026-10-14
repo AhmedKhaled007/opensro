@@ -4,7 +4,7 @@ import type {SystemNotice} from './system-notices';
 export function inventoryNotice(opcode:number,payload:Uint8Array,country?:number,itemMallOpen=false):SystemNotice|null{
  // 766A42..766A79: B053 sends every non-1 result to category 1.
  // Ordinary inventory/item-use acknowledgements recognize result 2 only.
- if(opcode===0xb053){if(payload.length!==2)throw Error('Invalid Magic Pop result');if(payload[0]===1)return null;}
+ if(opcode===0xb053){if(payload.length!==2)throw Error('Invalid Magic Pang result');if(payload[0]===1)return null;}
  else if((opcode!==0xb06d&&opcode!==0xb5bd)||payload[0]!==2)return null;
  if(payload.length!==2)throw Error('Invalid inventory rejection');
  const result=resolveNativeNotice(1,payload[1]!,{country,itemMallOpen});

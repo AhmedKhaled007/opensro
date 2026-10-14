@@ -29,6 +29,7 @@ const (
 	NpcTalkFlagGeneral       uint32 = 0x2000  // option 0xE, no row
 	NpcTalkFlagGuild         uint32 = 0x4000  // option 0xF, rows 0x12..0x1D
 	NpcTalkFlagGachaMachine  uint32 = 0x10000 // option 0x11, row 0x27
+	NpcTalkFlagGachaOperator uint32 = 0x20000 // option 0x12, row 0x28 (5D9750): the voucher exchange
 	NpcTalkFlagJobTrader     uint32 = 0x80000
 	NpcTalkFlagJobThief      uint32 = 0x100000
 	NpcTalkFlagJobHunter     uint32 = 0x200000
@@ -49,7 +50,7 @@ const (
 	// the fortress staff other than the official, and gate pulleys.
 	NpcTalkImplementedFlags uint32 = NpcTalkFlagShop | NpcTalkFlagTalk | NpcTalkFlagStorage |
 		NpcTalkFlagRepair | NpcTalkFlagRecallPoint | NpcTalkFlagTeleport | NpcTalkFlagStable |
-		NpcTalkFlagSpecialTrade | NpcTalkFlagThiefBuy | NpcTalkFlagGeneral | NpcTalkFlagGachaMachine |
+		NpcTalkFlagSpecialTrade | NpcTalkFlagThiefBuy | NpcTalkFlagGeneral | NpcTalkFlagGachaMachine | NpcTalkFlagGachaOperator |
 		NpcTalkFlagJobTrader | NpcTalkFlagJobThief | NpcTalkFlagJobHunter | NpcTalkFlagReverseReturn |
 		NpcTalkFlagGuild | NpcTalkFlagMagicOption | NpcTalkFlagFortressOfficial
 )

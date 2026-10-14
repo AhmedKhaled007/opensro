@@ -530,7 +530,15 @@ import {
 	travelLoadingBackground
 } from "@/engine/foundation/ui/mission-loading";
 import { catalogMessage } from "@/engine/foundation/ui/catalog-message";
-import { gachaPrizes, isGachaTicket } from "@/engine/foundation/gameplay/gacha-catalog";
+import {
+	GACHA_FUNCTION,
+	GACHA_OPERATOR_FUNCTION,
+	gachaPrizeEntry,
+	gachaSheet,
+	gachaSheetFrameRect,
+	isGachaVoucher
+} from "@/engine/foundation/ui/gacha-window";
+import { createGachaHud } from "./hud/gacha-hud";
 import {
 	quickSlotCommand,
 	quickSlotItemSlot,
@@ -623,7 +631,9 @@ const WORLD_MAP_HEIGHT = 424;
 const VIDEO_FRAME_LIMIT_SLOT = -3;
 const VIDEO_VISIBLE_ROWS = 6;
 const VIDEO_SCROLL_MAX = videoRows().length + 1 - VIDEO_VISIBLE_ROWS;
-const ROOT = "/assets/images/Media_extracted/", BUTTON = ROOT + "interface/ifcommon/com_button.png";
+const ROOT = "/assets/images/Media_extracted/",
+	PREPARE_SHEET = "/assets/images/Media_extracted/interface/alchemy/alcm_effect_prepare.png",
+	BUTTON = ROOT + "interface/ifcommon/com_button.png";
 // 683B40 assigns the notice root this texture after creating it.
 const MALL_NOTICE_FRAME = ROOT + "interface/mall/mall_communicate.png";
 const PARTS = frameParts();
@@ -698,12 +708,15 @@ const MAIN_POPUP_PANELS: readonly string[] = [
 	"Academy",
 	...INVENTORY_POPUP_PANELS
 ];
+// The windows in which a dragged bag item is carried as an icon under the
+// pointer: every bag-popup panel, and CIFGhaCha, which embeds its own bag.
+const ITEM_CARRY_PANELS: readonly string[] = [ ...INVENTORY_POPUP_PANELS, "Magic Pang" ];
 // The slider's thumb travel inside GDR_SLIDER_CTRL (prev 2..22, next at 125).
 const SKIN_SLIDER_TRAVEL = 85;
 // CIFStall_OnCreate (5A2D60): the "Sell goods" tab's rect in the window.
 const STALL_TAB_X = 0x1c, STALL_TAB_Y = 0x56, STALL_TAB_W = 0x50, STALL_TAB_H = 0x18;
 // Item slot controls a carry can leave: inventory, avatar, storage, pet bag.
-const ITEM_SLOT_PREFIXES = [ "slot:", "avatar:", "storage-slot:", "cos-slot:" ] as const;
+const ITEM_SLOT_PREFIXES = [ "slot:", "avatar:", "storage-slot:", "cos-slot:", "gacha-bag:", "gacha-card" ] as const;
 const BUTTON_FOCUS = BUTTON.replace( ".png", "_focus.png" ),
 	BUTTON_PRESS = BUTTON.replace( ".png", "_press.png" ),
 	BUTTON_DISABLE = BUTTON.replace( ".png", "_disable.png" );
@@ -956,6 +969,7 @@ export function createUi(
 	const unionHud = createUnionHud();
 	const guildWarHud = createGuildWarHud();
 	const exchangeHud = createExchangeHud();
+	const gachaHud = createGachaHud();
 	const stallHud = createStallHud();
 	const grantPowerHud = createGrantPowerHud();
 	const compositeItemHud = createCompositeItemHud();
@@ -1222,10 +1236,7 @@ export function createUi(
 		alchemySlots: number[] = [],
 		alchemyQuantity = "1",
 		processPage = 0,
-		gachaPage = 0,
-		gachaWasVisible = false,
-		gachaEntry = 1,
-		gachaSlot = -1;
+		gachaWasVisible = false;
 	let selectedAction = 4000;
 	let partyMatchSelection = 0, partyMatchOffset = 0;
 	let partyMatchSort: keyof PartyListing = "id", partyMatchDescending = false;
@@ -1376,8 +1387,29 @@ export function createUi(
 	canLeavePanel
 	================
 	*/
+	/*
+	================
+	gachaInput
+
+	What the Magic Pang hud reads each frame: the worker's roll state, the simulation
+	clock it stamped `started` with, and bag lookups.
+	================
+	*/
+	function gachaInput() {
+		const gameplay = view?.gameplay;
+		return {
+			gacha: gameplay?.gacha,
+			now: view?.simulationTimeMs ?? uiNow,
+			items: gameplay?.inventory ?? []
+		};
+	}
+	/*
+	================
+	canLeavePanel
+	================
+	*/
 	function canLeavePanel() {
-		return panel !== "Magic Pop" || ![ "rolling", "waiting" ].includes( view?.gameplay?.gacha?.phase ?? "" );
+		return panel !== "Magic Pang" || ![ "rolling", "waiting" ].includes( view?.gameplay?.gacha?.phase ?? "" );
 	}
 	/*
 	================
@@ -1615,7 +1647,7 @@ export function createUi(
 		carriedItem = null;
 		if ( panel === "Option" ) audioPreference( audioSaved, false );
 		if ( panel === "Alchemy" ) sendGameplay( { kind: "alchemy-close" } );
-		if ( panel === "Magic Pop" ) sendGameplay( { kind: "gacha-close" } );
+		if ( panel === "Magic Pang" ) sendGameplay( { kind: "gacha-close" } );
 		if ( panel === GRANT_PANEL ) sendGameplay( { kind: "magic-option-close" } );
 		if ( panel && !next ) sound( "close" );
 		if ( !next ) {
@@ -3152,6 +3184,13 @@ export function createUi(
 				timing: (potionDraft.timing & 128) |
 					Math.max( 5, Math.min( 95, (potionDraft.timing & 127) + (id === "potion-time-up" ? 5 : -5) ) )
 			};
+		} else if ( id === "gacha-exchange" && view.gameplay?.target ) {
+			// 5DB662: 642270 looks for a voucher in the bag first; with none the talk window says so.
+			const gid = view.gameplay.target;
+			if ( view.gameplay.inventory.some( row => row.slot >= 13 && isGachaVoucher( row.typeFlags ) ) ) {
+				gachaHud.clearNoVoucher();
+				sendGameplay( { kind: "gacha-exchange", gid } );
+			} else gachaHud.noVoucher( gid );
 		} else if ( id === "gacha-open" && view.gameplay?.target ) {
 			sendGameplay( { kind: "gacha-open", gid: view.gameplay.target } );
 		} else if ( id.startsWith( "alchemy-mode:" ) ) {
@@ -3178,12 +3217,14 @@ export function createUi(
 					{ quantity: Number( alchemyQuantity ) } :
 					{})
 			} );
-		} else if ( id.startsWith( "gacha-prize:" ) ) gachaEntry = Number( id.slice( 12 ) );
-		else if ( id.startsWith( "gacha-card:" ) ) gachaSlot = Number( id.slice( 11 ) );
-		else if ( id === "gacha-prev" ) gachaPage = Math.max( 0, gachaPage - 1 );
-		else if ( id === "gacha-next" ) gachaPage++;
-		else if ( id === "gacha-roll" ) sendGameplay( { kind: "gacha-roll", entry: gachaEntry, slot: gachaSlot } );
-		else if ( id === "process-next" ) processPage++;
+		} else if ( id.startsWith( "gacha-prize:" ) ) {
+			// 642550: a prize slot click while no roll is in flight.
+			gachaHud.select( Number( id.slice( 12 ) ), gachaHud.frame( gachaInput() ).busy );
+		} else if ( id.startsWith( "gacha-bag-page:" ) ) gachaHud.setBag( Number( id.slice( 15 ) ) );
+		else if ( id === "gacha-play" ) {
+			const roll = gachaHud.play( gachaInput() );
+			if ( roll ) sendGameplay( { kind: "gacha-roll", ...roll } );
+		} else if ( id === "process-next" ) processPage++;
 		else if ( id === "process-prev" ) processPage = Math.max( 0, processPage - 1 );
 		else if ( id === "invite-accept" || id === "invite-refuse" || id === "invite-close" ) {
 			sendGameplay( { kind: "social-consent", accept: id === "invite-accept" } );
@@ -5882,6 +5923,37 @@ export function createUi(
 					carriedItem = null;
 					dirty = true;
 				}
+				// 645180: a bag item released on the card slot registers it, whether it came from this
+				// window's bag or the main one (the source only has to be a bag slot); the slot's own item
+				// released anywhere else over the window empties it. Both ignore the release while a roll is in flight.
+				if ( panel === "Magic Pang" ) {
+					const target = topmostControlAt( controls, event.x, event.y ),
+						fromBag = event.id.startsWith( "gacha-bag:" ) || event.id.startsWith( "slot:" );
+					if ( fromBag && target?.id.startsWith( "gacha-" ) && !target.id.startsWith( "gacha-bag:" ) ) {
+						const input = gachaInput(),
+							current = gachaHud.frame( input ),
+							slot = Number( event.id.slice( event.id.indexOf( ":" ) + 1 ) );
+						gachaHud.drop(
+							slot,
+							input.items.find( row => row.slot === slot ),
+							current.busy,
+							current.state === 2
+						);
+						carriedItem = null;
+						dirty = true;
+						return;
+					}
+					if ( event.id === "gacha-card" || event.id.startsWith( "gacha-bag:" ) ) {
+						if (
+							event.id === "gacha-card" && target && target.id !== "gacha-card" &&
+							(target.id.startsWith( "gacha-" ) || target.id.startsWith( "slot:" ))
+						) {
+							gachaHud.clearCard( gachaHud.frame( gachaInput() ).busy );
+						}
+						dirty = true;
+						return;
+					}
+				}
 				// CIFStall: an offer dragged back onto the bag leaves the stall.
 				if ( event.id.startsWith( "stall-slot:" ) && view?.gameplay?.stall?.phase === "owner" ) {
 					const target = topmostControlAt( controls, event.x, event.y ),
@@ -6243,12 +6315,14 @@ export function createUi(
 			}
 			if (
 				event.kind === "drag" && ITEM_SLOT_PREFIXES.some( prefix => event.id.startsWith( prefix ) ) &&
-				INVENTORY_POPUP_PANELS.includes( panel )
+				ITEM_CARRY_PANELS.includes( panel )
 			) {
 				const node = controls.find( c => c.id === event.id && !c.disabled && c.draggable );
 				if ( !node ) return;
 				const avatar = event.id.startsWith( "avatar:" ),
-					slot = avatar ?
+					slot = event.id === "gacha-card" ?
+						gachaHud.frame( gachaInput() ).cardSlot :
+						avatar ?
 						view?.gameplay?.avatarInventory?.find( i =>
 							i.typeFlags >>> 11 === Number( event.id.slice( 7 ) )
 						)?.slot :
@@ -7516,6 +7590,7 @@ export function createUi(
 				dirty = true;
 			}
 			const phase = next.session?.phase ?? "signed-out";
+			if ( next.gameplay?.npcConversation?.phase !== "menu" ) gachaHud.clearNoVoucher();
 			if ( phase === "world" ) {
 				for ( const notice of next.gameplay?.notices ?? [] ) {
 					if ( notice.sequence !== undefined && notice.sequence > noticeDialogSequence ) {
@@ -7605,9 +7680,8 @@ export function createUi(
 			if ( phase !== "disconnected" ) disconnectPosition = null;
 			const gachaVisible = phase === "world" && !!next.gameplay?.gacha?.visible;
 			if ( gachaVisible && !gachaWasVisible ) {
-				gachaPage = 0;
-				gachaSlot = -1;
-				setPanel( "Magic Pop" );
+				gachaHud.reset();
+				setPanel( "Magic Pang" );
 			}
 			gachaWasVisible = gachaVisible;
 			// B338 lock 0x80000000 (75AE50) shows the grant window with the inventory.
@@ -7967,6 +8041,21 @@ export function createUi(
 			) {
 				paths.push( path );
 				if ( resources.has( path ) ) rect( r, color, path, uv, clip );
+			}
+			/*
+			================
+			additiveImage
+
+			An effect sheet without alpha, drawn additively: black adds nothing. INFERENCE: the
+			native effect statics (ga_effect_*, alcm_effect_prepare) are opaque DXT1 art, so the
+			original can only show them by adding them to what is behind.
+			================
+			*/
+			function additiveImage( r: UiRect, path: string, uv: UiRect = [ 0, 0, 1, 1 ] ) {
+				paths.push( path );
+				if ( resources.has( path ) ) {
+					quads.push( { rect: r, color: white, texture: path, uv, clip: full, additive: true } );
+				}
 			}
 			/*
 			================
@@ -10102,16 +10191,6 @@ export function createUi(
 					// Banners own a separate strip below player, pet, target buffs and telemetry.
 					compactTelemetryTop = Math.max( targetBottom, compactTelemetryTop );
 					targetBottom = drawTransientBanners( compactTelemetryTop + HUD_TOOLS_HEIGHT + 12 );
-				}
-				if ( target?.kind === "npc" && target.refObjId === 9251 ) {
-					button(
-						"gacha-open",
-						"Magic Pop",
-						w / 2 - 110,
-						102,
-						100,
-						game?.inventoryPending || !!game?.targetPending
-					);
 				}
 				const barX = compact ? 0 : Math.trunc( (w - 800) / 2 ), barY = compact ? compact.top : h - 52;
 				if ( hudData && !compact ) {
@@ -13831,7 +13910,9 @@ export function createUi(
 							) :
 							null,
 						canTalk: !!(capabilities & 2),
-						prompt: outcomePage ?
+						prompt: gachaHud.noVoucherFor() === game.npcConversation.gid ?
+							copy( "SN_TALK_CH_GACHA_OPERATOR_3" ) :
+							outcomePage ?
 							copy( "UIIT_STT_OUTCOME_WINDOW" ).replace( "%s", game.social?.localName ?? "" ).replace(
 								"%s",
 								outcomeReward.toLocaleString( "en-US" )
@@ -13874,6 +13955,8 @@ export function createUi(
 							}) ) :
 							null,
 						canMagicOption: !!(capabilities & AVATAR_MAGIC_OPTION_FUNCTION),
+						canGacha: !!(capabilities & GACHA_FUNCTION),
+						canGachaOperator: !!(capabilities & GACHA_OPERATOR_FUNCTION),
 						// 5D9100 lists the guild set ahead of the job menu.
 						jobRows: [
 							...guildManagerRows( capabilities, game.social?.guild, game.social?.localName ?? "" ).map(
@@ -15329,6 +15412,174 @@ export function createUi(
 						}
 					}
 					endWindow( admission, "service:COS inventory" );
+				}
+				/*
+				================
+				gachaWindow
+
+				CIFGhaCha (ginterface GDR_GHACHA, resinfo\ifghacha.txt, 6450F0). The authored
+				controls paint in native order. The reels, effect, DECO sheet, prize slots, card
+				slot and Play button are live (643070, 642170, 645180); the bag at the right is
+				the Inventory section, laid out as the main bag is (59DF10).
+				================
+				*/
+				function gachaWindow() {
+					const root = hudData?.root.GDR_GHACHA, page = hudData?.windows.ifghacha;
+					if ( !root || !page || !game ) return;
+					const admission = beginWindow(),
+						firstControl = controls.length,
+						[px, py] = windowOrigin( "Magic Pang", [
+							Math.max( 0, (w - root.rect[2]) / 2 ),
+							Math.max( 0, (h - root.rect[3]) / 2 ),
+							root.rect[2],
+							root.rect[3]
+						] ),
+						frame = gachaHud.frame( gachaInput() ),
+						prizes = game.gacha?.prizes ?? [],
+						art = ( name: string ) => ROOT + "interface/game/" + name + ".png",
+						digits = ( n: number, width: number ) => String( n ).padStart( width, "0" );
+					// 645180 is the window's own drop handler (vtable 27), not the card slot's: a bag item
+					// released anywhere over the window registers. This region sits under every other control.
+					controls.splice( firstControl, 0, {
+						id: "gacha-window",
+						label: "Magic Pang",
+						kind: "region",
+						rect: [ px, py, root.rect[2], root.rect[3] ]
+					} );
+					// 643070 names these in code. Demand them with the window so the first spin
+					// never shows an empty reel.
+					for ( let f = 0; f <= 20; f += 2 ) paths.push( art( "gacha_roll" + digits( f, 4 ) ) );
+					for ( let f = 1; f <= 19; f++ ) paths.push( art( "ga_effect_" + digits( f, 2 ) ) );
+					paths.push( art( "gacha_roll_original" ), art( "ga_effect_sucess" ), PREPARE_SHEET );
+					nativeFrame( root, px, py, hudCopy( "UIIT_PAG_GACHA_TITLE" ), panelCloseId( "Magic Pang" ) );
+					for ( const node of authoredPaintOrder( page ) ) {
+						const r = authoredRect( node, px, py );
+						if ( node.name === "GDR_GHACHA_STA_ROLLING_L" || node.name === "GDR_GHACHA_STA_ROLLING_R" ) {
+							image(
+								r,
+								art(
+									frame.reelFrame === null ?
+										"gacha_roll_original" :
+										"gacha_roll" + digits( frame.reelFrame, 4 )
+								)
+							);
+						} else if ( node.name === "GDR_GHACHA_STA_EFFACT" ) {
+							additiveImage( r, art( "ga_effect_" + digits( frame.effectFrame, 2 ) ) );
+						} else if ( node.name === "GDR_GHACHA_DECO" ) {
+							if ( !frame.deco ) continue;
+							const sheet = frame.deco.sheet === "success",
+								sheetPath = sheet ? art( "ga_effect_sucess" ) : PREPARE_SHEET,
+								size = resources.size( sheetPath );
+							if ( size ) {
+								additiveImage(
+									r,
+									sheetPath,
+									gachaSheetFrameRect( gachaSheet( frame.deco.sheet ), frame.deco.frame, size )
+								);
+							} else paths.push( sheetPath );
+						} else if ( node.name === "GDR_GHACHA_CARD_SLOT" ) {
+							nativeItem(
+								"gacha-card",
+								frame.cardSlot >= 0 ?
+									game.inventory.find( item => item.slot === frame.cardSlot ) :
+									undefined,
+								r,
+								frame.busy
+							);
+						} else if ( node.name === "GDR_GHACHA_BTN_START" ) {
+							authoredLabeledButton(
+								node,
+								px,
+								py,
+								"gacha-play",
+								hudCopy( node.text ),
+								!frame.playEnabled
+							);
+						} else if ( node.type === "CIFSlotWithHelp" ) {
+							const entry = gachaPrizeEntry( node.id ), prize = prizes.find( row => row.entry === entry );
+							if ( !prize || entry === null ) continue;
+							const icon = iconPath( prize.icon );
+							if ( icon ) image( r, icon );
+							itemCount( { quantity: prize.quantity }, r );
+							// INFERENCE: 642550 sets the chosen slot's selected byte (+0x4FE) and 641DD0 clears the
+							// others, which the native slot draws as a highlight (565850). The effect's art is not
+							// recovered, so the port outlines the chosen slot in gold.
+							if ( frame.entry === entry ) {
+								const gold: UiQuad["color"] = [ 1, 0.82, 0.25, 1 ];
+								rect( [ r[0] - 1, r[1] - 1, r[2] + 2, 2 ], gold );
+								rect( [ r[0] - 1, r[1] + r[3] - 1, r[2] + 2, 2 ], gold );
+								rect( [ r[0] - 1, r[1] - 1, 2, r[3] + 2 ], gold );
+								rect( [ r[0] + r[2] - 1, r[1] - 1, 2, r[3] + 2 ], gold );
+							}
+							controls.push( {
+								id: "gacha-prize:" + entry,
+								label: localization.text( prize.nameSymbol, "" ) + " x" + prize.quantity,
+								rect: r,
+								kind: "button",
+								disabled: frame.busy,
+								selected: frame.entry === entry
+							} );
+						} else {
+							authoredChrome( node, px, py );
+							if ( node.name === "GDR_GHACHA_GRADATION" ) {
+								const line = frame.result === "win" ?
+									hudCopy( "UIIT_MSG_GACHA_WIN" ).replace(
+										"%s",
+										() =>
+											localization.text(
+												prizes.find( row => row.refObjId === frame.reward?.refObjId )
+													?.nameSymbol,
+												""
+											)
+									).replace( "%d", () => String( frame.reward?.quantity ?? 0 ) ) :
+									frame.result === "lose" ?
+									hudCopy( "UIIT_MSG_GACHA_LOSE" ) :
+									hudCopy( frame.text ?? "" );
+								authoredText( node, px, py, line );
+							} else if ( node.name === "GDR_CHACHA_STA_MONEY" ) {
+								authoredText( { ...node, hAlign: 2 }, px, py, String( game.progression?.gold ?? "0" ) );
+							}
+						}
+					}
+					// The Inventory section's bag, with the main bag's page tabs (above its frame).
+					const bagFrame = page.GDR_INVENTORY_FRAME;
+					if ( bagFrame ) {
+						const bx = px + bagFrame.rect[0],
+							by = py + bagFrame.rect[1],
+							bag = inventorySlots(
+								bx,
+								by,
+								game.inventorySlotCount ?? 0,
+								game.equipmentSlotCount ?? 13,
+								gachaHud.bag(
+									1 +
+										Math.max(
+											0,
+											Math.ceil(
+												((game.inventorySlotCount ?? 0) - (game.equipmentSlotCount ?? 13)) / 32
+											) - 1
+										)
+								)
+							);
+						for ( let tab = 0; tab < bag.pages; tab++ ) {
+							nativeTab(
+								"gacha-bag-page:" + tab,
+								hudCopy( tab ? "UIIT_STT_INVENTORY_EXTENSION_TEB" : "UIIT_CTL_BELOINGING" ),
+								[ bx + 4 + 62 * tab, by - 23, 60, 24 ],
+								tab === bag.page,
+								{ family: "com_tab" }
+							);
+						}
+						for ( const cell of bag.slots ) {
+							const item = game.inventory.find( row => row.slot === cell.slot );
+							if ( !cell.enabled ) {
+								image( cell.rect, hudData!.popupArt.blocked );
+								continue;
+							}
+							nativeItem( "gacha-bag:" + cell.slot, item, cell.rect, frame.busy );
+						}
+					}
+					endWindow( admission, "service:Magic Pang" );
 				}
 				/*
 				================
@@ -17259,76 +17510,13 @@ export function createUi(
 						if ( friendDialog ) friendDialogBox();
 					}
 				}
-				if ( [ "Magic Pop", "Chat" ].includes( panel ) ) {
+				if ( panel === "Magic Pang" ) gachaWindow();
+				if ( panel === "Chat" ) {
 					const admission = beginWindow();
 					const px = Math.max( 12, (w - 380) / 2 ), py = Math.max( 150, (h - 440) / 2 );
 					windowBox( panel, px, py, 380, 420 );
-					closeButton( px + 354, py + 10, panelCloseId( panel === "Chat" ? "Chat" : "Magic Pop" ) );
-					if ( panel === "Magic Pop" ) {
-						const active = game?.gacha,
-							busy = !!game?.inventoryPending,
-							prizes = gachaPrizes(),
-							cards = game?.inventory.filter( item => isGachaTicket( item.typeFlags ) ) ?? [];
-						prizes.forEach( ( prize, index ) =>
-							button(
-								"gacha-prize:" + prize.entry,
-								localization.text( prize.nameSymbol, "Loading item..." ) + " x" + prize.quantity,
-								px + 22 + (index % 2) * 170,
-								py + 45 + Math.floor( index / 2 ) * 27,
-								164,
-								busy,
-								prize.entry === gachaEntry
-							)
-						);
-						gachaPage = Math.min( gachaPage, Math.max( 0, Math.ceil( cards.length / 2 ) - 1 ) );
-						cards.slice( gachaPage * 2, gachaPage * 2 + 2 ).forEach( ( item, index ) =>
-							button(
-								"gacha-card:" + item.slot,
-								(item.name ?? "Magic Pop card") + " x" + item.quantity,
-								px + 22,
-								py + 216 + index * 28,
-								336,
-								busy,
-								gachaSlot === item.slot
-							)
-						);
-						button( "gacha-prev", "Previous", px + 22, py + 276, 164, busy || gachaPage === 0 );
-						button(
-							"gacha-next",
-							"Next",
-							px + 194,
-							py + 276,
-							164,
-							busy || (gachaPage + 1) * 2 >= cards.length
-						);
-						button(
-							"gacha-roll",
-							"Play",
-							px + 22,
-							py + 314,
-							336,
-							busy || !cards.some( item => item.slot === gachaSlot )
-						);
-						label(
-							active?.phase === "rolling" ?
-								"Rolling..." :
-								active?.phase === "waiting" ?
-								"Waiting for result..." :
-								active?.result === "win" ?
-								"Win: " + localization.text(
-									prizes.find( p => p.refObjId === active.reward?.refObjId )?.nameSymbol,
-									"Reward"
-								) + " x" + active.reward?.quantity :
-								active?.result === "lose" ?
-								"Try again" :
-								active?.error !== null && active?.error !== undefined ?
-								"Magic Pop rejected: " + active.error :
-								"Select a prize and a card.",
-							px + 22,
-							py + 354,
-							gold
-						);
-					} else if ( panel === "Chat" ) {
+					closeButton( px + 354, py + 10, panelCloseId( "Chat" ) );
+					if ( panel === "Chat" ) {
 						const channels = [ [ 1, "All" ], [ 2, "Whisper" ], [ 4, "Party" ], [ 5, "Guild" ], [
 							11,
 							"Union"
@@ -20684,8 +20872,7 @@ export function createUi(
 				}
 			}
 			if (
-				worldVisible && carriedItem &&
-				INVENTORY_POPUP_PANELS.includes( panel )
+				worldVisible && carriedItem && ITEM_CARRY_PANELS.includes( panel )
 			) {
 				const item = carriedRow( carriedItem, game ), path = iconPath( item?.icon );
 				if ( path ) {

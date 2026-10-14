@@ -74,6 +74,11 @@ func LoadNpcWorldRoster(textdataDir string) []NpcDef {
 		fixtureByCode[row.Codename] = row
 	}
 
+	lookups := worldNpcLookups{
+		fortresses:    fortresses,
+		storeGroups:   storeGroupsByNpc,
+		fixtureByCode: fixtureByCode,
+	}
 	positions := readNpcTabbed(filepath.Join(textdataDir, "npcpos.txt"))
 	roster := make([]NpcDef, 0, len(positions))
 	for _, cols := range positions {
@@ -99,38 +104,10 @@ func LoadNpcWorldRoster(textdataDir string) []NpcDef {
 		if index >= int(domain.GroundItemGIDBase-domain.NPCGIDBase-1) {
 			break
 		}
-		heading, _ := npcPlacementHeading(ref.codename, region, x, y, z)
-		row := NpcDef{
-			ObjectID:          domain.NPCGIDBase + uint32(index) + 1,
-			RefObjID:          ref.refObjID,
-			FortressID:        fortresses[ref.fortress],
-			TidWord:           ref.tidWord,
-			Codename:          ref.codename,
-			NameStrID:         ref.nameID,
-			Name:              ref.name,
-			ModelPath:         ref.model,
-			Level:             ref.level,
-			MaxHP:             ref.maxHP,
-			BaseSpeechSymbol:  ref.base,
-			QuestSpeechSymbol: ref.quest,
-			AuthoredSpawn:     true,
-			Spawn:             Spawn{RegionID: region, X: x, Y: y, Z: z, Angle: heading},
-			WalkSpeed:         ref.walk,
-			RunSpeed:          ref.run,
-			ScaleDenom:        ref.scale,
-		}
-		row.NpcTalkStoreGroups = cloneNpcStoreGroups(storeGroupsByNpc[row.Codename])
-		// Rebirth destinations are server gameplay policy and are not present in
-		// the four shipped refshop tables. Preserve the pinned guide policy only;
-		// shop rows are always rebuilt from authored data above.
-		if pinned, found := fixtureByCode[row.Codename]; found {
-			row.RebirthPoint = pinned.RebirthPoint
-		}
-		row.Services = ResolveNpcServices(row)
-		row.TalkFlags = ResolveNpcTalkFlags(row)
+		row := newWorldNpc(ref, domain.NPCGIDBase+uint32(index)+1, Spawn{RegionID: region, X: x, Y: y, Z: z}, lookups)
 		roster = append(roster, row)
 	}
-	return roster
+	return appendMagicPopMachines(roster, refs, lookups)
 }
 
 // loadNpcStoreGroupIndex projects the exact native lookup chain used by
