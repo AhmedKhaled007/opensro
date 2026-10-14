@@ -218,6 +218,37 @@ func (rt *Runtime) shopCatalog(division string, c *enterworld.Character, gid uin
 
 /*
 ================
+commerceDoorLabel
+
+The door a shop transaction commits under, which names its gold rows in
+the economy ledger (port-only, domain/economy.go): a sale whose sold row is
+trade goods (in the bag, or in the COS bag the sale names, a transport's
+or a pickup pet's) pays out under "trade-sale"; every other purchase or
+sale stays "shop-transaction". The snapshot is read before the door; the
+door's own admission still decides.
+================
+*/
+func commerceDoorLabel(snapshot *enterworld.Character, q wire.ItemMoveRequest, fromCOS bool) string {
+	if q.MovementType != wire.MoveTypeShopSell {
+		return "shop-transaction"
+	}
+	rows := snapshot.MissionInventory
+	if fromCOS {
+		rows = nil
+		if cos := snapshot.CompanionByGID(q.CosGID); cos != nil && cos.Container != nil {
+			rows = cos.Container.Rows
+		}
+	}
+	for _, row := range rows {
+		if row.Slot == int64(q.SourceSlot) && inventory.IsTradeGoods(row.TypeFlags) {
+			return "trade-sale"
+		}
+	}
+	return "shop-transaction"
+}
+
+/*
+================
 applyCommerce
 ================
 */
@@ -242,7 +273,7 @@ func (rt *Runtime) applyCommerce(division string, c *enterworld.Character, q wir
 	refusal := wire.ErrCodeInvalidRequest
 	roster := rt.commerceRoster(division, c)
 	var collected int64
-	committed := rt.deps.SettleTrade(roster.members, "shop-transaction", func(pool *domain.TradeRewardPool) bool {
+	committed := rt.deps.SettleTrade(roster.members, commerceDoorLabel(snapshot, q, isCOS), func(pool *domain.TradeRewardPool) bool {
 		if c.DeletePending {
 			return false
 		}
