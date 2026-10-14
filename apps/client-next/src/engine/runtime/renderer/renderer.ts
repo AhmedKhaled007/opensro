@@ -692,6 +692,7 @@ export function createRenderer(
 				const dollInput = uiProduct?.doll;
 				// A hidden doll stays borrowed and warm for the local character, so
 				// the inventory's first open does not prepare a model (portrait.warm).
+				if ( !dollInput ) doll.pause();
 				if ( !dollInput && portraitGid !== undefined ) {
 					doll.warm( characters.portraitSource( portraitGid ), device.geometry()!, device.images()! );
 				}

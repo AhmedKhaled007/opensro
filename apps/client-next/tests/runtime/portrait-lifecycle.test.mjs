@@ -352,3 +352,24 @@ test("a doll wears its items' glows, never the world's skill and buff effects", 
 	assert.equal( doll?.children?.[0]?.actor.attachment?.bone, "equipment:6:EQ0:ai_end" );
 	f.preview.dispose( f.geometry, f.images );
 });
+test("a doll that was not drawn resumes its clock where it stopped, however long it was closed", () => {
+	const f = fixture();
+	f.preview.prepare( f.source, f.geometry, f.images, { yaw: 0, seconds: 10 } );
+	f.preview.prepare( f.source, f.geometry, f.images, { yaw: 0, seconds: 11.5 } );
+	assert.equal( f.actorTime(), 1.5 );
+	// The renderer pauses the doll on every frame the window is closed.
+	f.preview.pause();
+	f.preview.pause();
+	f.preview.prepare( f.source, f.geometry, f.images, { yaw: 0, seconds: 4000 } );
+	assert.equal( f.actorTime(), 1.5, "reopening must not replay the closed interval" );
+	f.preview.prepare( f.source, f.geometry, f.images, { yaw: 0, seconds: 4000.25 } );
+	assert.equal( f.actorTime(), 1.75 );
+});
+test("a warmed doll starts its clock when the window first draws it, not at the session start", () => {
+	const f = fixture();
+	f.preview.warm( f.source, f.geometry, f.images );
+	f.preview.prepare( f.source, f.geometry, f.images, { yaw: 0, seconds: 5000 } );
+	assert.equal( f.actorTime(), 0 );
+	f.preview.prepare( f.source, f.geometry, f.images, { yaw: 0, seconds: 5001 } );
+	assert.equal( f.actorTime(), 1 );
+});

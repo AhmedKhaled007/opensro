@@ -130,7 +130,10 @@ export function createPortrait(
 		dispose( geometry: GeometryCommands | null, images: ImageCommands | null ): void;
 	}
 ) {
-	let source: CharacterModel | null = null, started = 0, identity: number | undefined;
+	let source: CharacterModel | null = null, identity: number | undefined;
+	// The doll clock: seconds the doll has been drawn since its model or gid last
+	// changed, and the frame time it last advanced to (undefined while at rest).
+	let drawn = 0, drawnAt: number | undefined;
 	let borrowed: readonly PortraitPart[] = [];
 	let empty = true;
 	// The retained HUD result: owned copies of every input that decides the
@@ -255,7 +258,8 @@ export function createPortrait(
 				source = value.model;
 			}
 			if ( bodyChanged || identity !== value.actor.gid ) {
-				started = seconds;
+				drawn = 0;
+				drawnAt = undefined;
 				identity = value.actor.gid;
 				if ( bodyChanged ) {
 					preview.actors( [] );
@@ -270,6 +274,13 @@ export function createPortrait(
 					source = value.model;
 				}
 			}
+			// Only a drawn frame advances the doll clock. A frame without seconds (warm)
+			// or after pause() resumes from the time it stopped, so reopening the
+			// window never replays the closed interval through the effects.
+			if ( dollYaw !== undefined && frame.seconds !== undefined ) {
+				if ( drawnAt !== undefined ) drawn += Math.max( 0, seconds - drawnAt );
+				drawnAt = seconds;
+			}
 			const actor: CharacterActor = {
 				...value.actor,
 				animationLod: undefined,
@@ -281,7 +292,7 @@ export function createPortrait(
 				layers: undefined,
 				clip: (dollYaw === undefined ? undefined : value.actor.previewClip) ??
 					value.model.clips.find( c => c.name === "stand" )?.name ?? value.actor.clip,
-				time: dollYaw === undefined ? 0 : Math.max( 0, seconds - started ),
+				time: dollYaw === undefined ? 0 : drawn,
 				loop: true,
 				scale: 1
 			};
@@ -346,7 +357,17 @@ export function createPortrait(
 		*/
 		warm( value: PortraitSource | null, geometry: GeometryCommands, images: ImageCommands ) {
 			if ( !value || source === value.model ) return;
-			this.prepare( value, geometry, images, { yaw: DEFAULT_PREVIEW_YAW, seconds: 0 } );
+			this.prepare( value, geometry, images, { yaw: DEFAULT_PREVIEW_YAW } );
+		},
+		/*
+		================
+		pause
+
+		The doll was not drawn this frame. Its clock resumes from where it stopped.
+		================
+		*/
+		pause() {
+			drawnAt = undefined;
 		},
 		/*
 		================
@@ -369,6 +390,7 @@ export function createPortrait(
 			source = null;
 			borrowed = [];
 			empty = true;
+			drawnAt = undefined;
 		}
 	};
 }
