@@ -13,6 +13,8 @@ import { CLIENT_NEXT_BASE_URL } from "../../../../../scripts/lib/probeEndpoints.
 import { resolveProbeCredentials, resolveProbeDivisionId } from "../../../../../scripts/lib/probeSession.mjs";
 import { assertCharacterAllowed } from "../../../../../scripts/lib/probeCharacter.mjs";
 
+const WORLD_POLL_MS = 250;
+
 /*
 ================
 bindPlayableRuntime
@@ -47,6 +49,9 @@ export async function bindPlayableRuntime( page ) {
 /*
 ================
 waitPlayableWorld
+
+Polls on a timer: Playwright's default animation-frame polling never runs
+in a hidden tab, where a background entry must still be observed.
 ================
 */
 export async function waitPlayableWorld( page, character ) {
@@ -61,16 +66,20 @@ export async function waitPlayableWorld( page, character ) {
 				/Frontend: world\n/.test( document.querySelector( "output" )?.textContent );
 		},
 		character,
-		{ timeout: 60000 }
+		{ timeout: 60000, polling: WORLD_POLL_MS }
 	);
 }
 /*
 ================
-bootPlayableSession
+enterPlayableSession
+
+Log in and press Enter for the scratch character, without waiting for the
+world. A probe that changes the page between entry and arrival (a hidden
+tab) starts here; everything else uses bootPlayableSession.
 ================
 */
 /** @param {((page: import('playwright-core').Page) => Promise<void>) | undefined} [beforeLogin] */
-export async function bootPlayableSession( page, name, beforeLogin = undefined ) {
+export async function enterPlayableSession( page, name, beforeLogin = undefined ) {
 	const character = assertCharacterAllowed( name, { context: "client-next playable skill acceptance" } );
 	await page.setViewportSize( { width: 1024, height: 768 } );
 	await page.route( "**/character/list", async route => {
@@ -96,6 +105,16 @@ export async function bootPlayableSession( page, name, beforeLogin = undefined )
 	await page.locator( '[data-ui-id="enter"]' ).waitFor();
 	await page.waitForFunction( () => document.querySelector( '[data-ui-id="enter"]' )?.disabled === false );
 	await page.locator( '[data-ui-id="enter"]' ).click();
+	return character;
+}
+/*
+================
+bootPlayableSession
+================
+*/
+/** @param {((page: import('playwright-core').Page) => Promise<void>) | undefined} [beforeLogin] */
+export async function bootPlayableSession( page, name, beforeLogin = undefined ) {
+	const character = await enterPlayableSession( page, name, beforeLogin );
 	await waitPlayableWorld( page, character );
 	return character;
 }
