@@ -21,8 +21,69 @@ export type GuideToken =
 	| { kind: "text"; value: string; color: UiQuad["color"] | null; strong: boolean; }
 	| { kind: "break"; }
 	| { kind: "image"; path: string; }
-	| { kind: "paragraph"; margin: number; };
-// The shipped event articles use SML2 text, strong, font color, BR and images.
+	| { kind: "paragraph"; margin: number; }
+	| { kind: "align"; align: GuideAlign; };
+
+// A line's horizontal alignment (the text board's <left>, <center> and
+// <right> scopes).
+export type GuideAlign = "left" | "center" | "right";
+// Text_HasSml2Markup (843100): longer than the 13-character wrapper and
+// opening "<sml2>" (case-sensitive). Its "</sml2>" search is a no-op natively
+// (neg/sbb/neg on the find position is true for npos too), so it is not tested.
+const SML2_MIN_LENGTH = 13;
+
+/*
+================
+hasSml2Markup
+
+Whether a string is native SML2 markup, as 843100 decides before a text
+board or message box renders it as markup rather than plain lines.
+================
+*/
+export function hasSml2Markup( value: string ): boolean {
+	return value.length > SML2_MIN_LENGTH && value.startsWith( "<sml2>" );
+}
+
+/*
+================
+markupArg
+
+A value filled into SML2 text (a name or a typed alias) with its angle
+brackets removed, so typed text can never open or close a markup scope.
+Natively 6461C0 refuses such a name before the confirm exists.
+================
+*/
+export function markupArg( value: string ): string {
+	return value.replace( /[<>]/g, "" );
+}
+
+/*
+================
+fillMarkup
+
+SML2 text with each %s replaced, in order, by its argument with angle
+brackets removed (markupArg). A replacer function, so "$" patterns in a
+player's text are literal and never re-insert the template.
+================
+*/
+export function fillMarkup( template: string, args: readonly string[] ): string {
+	return args.reduce( ( value, arg ) => value.replace( "%s", () => markupArg( arg ) ), template );
+}
+
+/*
+================
+groupedNumber
+
+A count with comma thousands separators, as the native std_wstring_format
+digit grouping (53E2A0) writes gold.
+================
+*/
+export function groupedNumber( value: number ): string {
+	return String( Math.trunc( value ) ).replace( /\B(?=(\d{3})+(?!\d))/g, "," );
+}
+
+// The shipped event articles use SML2 text, strong, font color, BR and images;
+// message boxes add the <left>, <center> and <right> line scopes.
 // Unsupported markup is rejected, never rendered as text or browser HTML.
 /*
 ================
@@ -37,8 +98,30 @@ export function guideTokens( source: string ): readonly GuideToken[] {
 	let strong = 0;
 	const fontBold: boolean[] = [];
 	const margins = [ 5 ];
+	const aligns: GuideAlign[] = [ "left" ];
 	for ( const token of source.split( /(<[^>]*>)/ ).filter( Boolean ) ) {
-		if ( /^<\/?sml2>$/i.test( token ) ) continue;
+		if ( /^<sml2>$/i.test( token ) ) continue;
+		if ( /^<\/sml2>$/i.test( token ) ) {
+			// The document's end closes any font scope still open: the shipped
+			// UIIT_STT_ALIAS_MODIFY_WINDOW leaves its gold line's <font> open,
+			// and the native text board (52C340) still renders it. Other scopes
+			// must balance.
+			while ( colors.length > 1 ) {
+				colors.pop();
+				if ( fontBold.pop() ) strong--;
+			}
+			continue;
+		}
+		const align = /^<(\/?)(left|center|right)>$/i.exec( token );
+		if ( align ) {
+			const name = align[2]!.toLowerCase() as GuideAlign;
+			if ( align[1] ) {
+				if ( aligns.length === 1 || aligns.at( -1 ) !== name ) throw Error( "Unbalanced guide alignment" );
+				aligns.pop();
+			} else aligns.push( name );
+			out.push( { kind: "align", align: aligns.at( -1 )! } );
+			continue;
+		}
 		if ( /^<br\s*\/?\s*>$/i.test( token ) ) {
 			out.push( { kind: "break" } );
 			continue;
@@ -111,7 +194,9 @@ export function guideTokens( source: string ): readonly GuideToken[] {
 			strong: strong > 0
 		} );
 	}
-	if ( strong || colors.length !== 1 || margins.length !== 1 ) throw Error( "Unbalanced guide markup" );
+	if ( strong || colors.length !== 1 || margins.length !== 1 || aligns.length !== 1 ) {
+		throw Error( "Unbalanced guide markup" );
+	}
 	return out;
 }
 /*
@@ -129,17 +214,44 @@ export function guideContent(
 ) {
 	const quads: UiQuad[] = [], paths: string[] = [];
 	let x = r[0], y = r[1], margin = 5, line = atlas.fonts["0"]!.recordHeight + margin;
+	// The current alignment, and the first quad of the line being laid out.
+	let align: GuideAlign = "left", lineStart = 0;
+	/*
+	================
+	finishLine
+
+	Shifts the finished line's quads to its alignment within r.
+	================
+	*/
+	const finishLine = () => {
+		const spare = r[2] - (x - r[0]);
+		if ( align !== "left" && spare > 0 ) {
+			const dx = align === "center" ? Math.floor( spare / 2 ) : spare;
+			for ( let i = lineStart; i < quads.length; i++ ) {
+				const q = quads[i]!;
+				quads[i] = { ...q, rect: [ q.rect[0] + dx, q.rect[1], q.rect[2], q.rect[3] ] };
+			}
+		}
+		lineStart = quads.length;
+	};
 	/*
 	================
 	newline
 	================
 	*/
 	const newline = () => {
+		finishLine();
 		x = r[0];
 		y += line;
 		line = atlas.fonts["0"]!.recordHeight + margin;
 	};
 	for ( const token of tokens ) {
+		if ( token.kind === "align" ) {
+			// An alignment scope starts on its own line.
+			if ( x > r[0] ) newline();
+			align = token.align;
+			continue;
+		}
 		if ( token.kind === "paragraph" ) {
 			if ( x > r[0] ) newline();
 			margin = token.margin;
@@ -185,5 +297,6 @@ export function guideContent(
 			x += width;
 		}
 	}
+	finishLine();
 	return { quads, paths, height: y - r[1] + line };
 }
