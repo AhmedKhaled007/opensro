@@ -722,6 +722,11 @@ const FORTRESS_TAX_ARROW_RIGHT = 270;
 const FORTRESS_TAX_TRAVEL = 234;
 // CIFJobRank and CIFJobContributionRank share one panel (job-hud.ts).
 const JOB_RANK_PANEL = "Job ranking";
+// CIFNpcTalk_AppendFortressServiceRows (5D7AD0) and the employ question
+// (5D3880) quote one fee for every fortress staff member: 0x7530 gold and
+// 0xBB8 guild points.
+const FORTRESS_STAFF_FEE_GOLD = 30000;
+const FORTRESS_STAFF_FEE_GP = 3000;
 // The smith's avatar magic option window (CIFGrantMagicAttributeWnd).
 const GRANT_PANEL = "Magic option";
 // The panels that show the bag in the main popup beside their own window, and
@@ -14246,8 +14251,12 @@ export function createUi(
 						fortressStaffRows: fortressStaffHud.target() ?
 							[ [ 1, "BATTLEAIDE" ], [ 2, "SMITH" ], [ 4, "TRAINER" ] ].map( ( [flag, name] ) => ({
 								id: "npc-fortress-hire:" + flag,
+								// 5D7AD0 fills the fee line with swprintf before it joins the row.
 								label: copy( "SN_FORTRESS_MANAGER_EMPLOY_" + name ) + " " +
-									copy( "SN_FORTRESS_MANAGER_EMPLOY_FEE" ),
+									fortressWarFormat( copy( "SN_FORTRESS_MANAGER_EMPLOY_FEE" ), [
+										FORTRESS_STAFF_FEE_GOLD,
+										FORTRESS_STAFF_FEE_GP
+									] ),
 								disabled: !fortressStaffView().commander ||
 									!!(fortressStaffView().flags & Number( flag ))
 							}) ) :
@@ -20450,63 +20459,42 @@ export function createUi(
 			}
 			const fortressAsk = fortressWarHud.question(), staffAsk = fortressStaffHud.question();
 			if ( worldVisible && (fortressAsk || staffAsk) ) {
-				// 6649C0's question boxes 0x64-0x67.
-				const layout = guildProposalLayout( w, h ),
-					row = view?.gameplay?.fortress?.fortresses.find( r => r.id === fortressAsk?.fortress ),
+				// CIFFortressWarApplyWndSlot_OpenConfirmMsgBox (664210) and
+				// CIFNpcTalk_ShowJobGuildMsgBox (5D3880) show these as plain text in
+				// CGInterface_ShowSimpleMessageBox, so 52BCF0 grows the box to its
+				// widest line ("[%s] Do you want to cancel the application for
+				// occupation?" is about 390 px); 6649C0 takes the answer.
+				const row = view?.gameplay?.fortress?.fortresses.find( r => r.id === fortressAsk?.fortress ),
 					name = row?.nameStrId ? hudCopy( row.nameStrId ) : "";
+				const message = fortressWarFormat(
+					hudCopy(
+						staffAsk ?
+							"UIIT_MSG_FORT_MANAGER_EMPLOY_WINDOW" :
+							fortressWarQuestionKey( fortressAsk!.question )
+					),
+					staffAsk ?
+						[
+							hudCopy(
+								"SN_FORTRESS_MANAGER_NPC_NAME_" +
+									(staffAsk.flag === 1 ?
+										"BATTLEAID" :
+										staffAsk.flag === 2 ?
+										"SMITH" :
+										"TRAINER")
+							),
+							FORTRESS_STAFF_FEE_GOLD,
+							FORTRESS_STAFF_FEE_GP
+						] :
+						[ name, row?.requestFee ?? 0 ]
+				);
 				controls = [];
 				blocks = [ full ];
-				paths.push( ...partyProposalAssets() );
-				quads.push(
-					...normalTile( layout.background, MESSAGE_TILE, resources.size( MESSAGE_TILE ), full ),
-					...frameRing(
-						layout.frame,
-						MESSAGE_FRAME,
-						PARTS.map( p => resources.size( MESSAGE_FRAME + p + ".png" ) ),
-						full
-					),
-					...text.quads( hudCopy( "UIIT_STT_CONFIRM_BOX" ), layout.title, full, white, {
-						hAlign: 1,
-						vAlign: 0
-					} ),
-					...text.quads(
-						fortressWarFormat(
-							hudCopy(
-								staffAsk ?
-									"UIIT_MSG_FORT_MANAGER_EMPLOY_WINDOW" :
-									fortressWarQuestionKey( fortressAsk!.question )
-							),
-							staffAsk ?
-								[
-									hudCopy(
-										"SN_FORTRESS_MANAGER_NPC_NAME_" +
-											(staffAsk.flag === 1 ?
-												"BATTLEAID" :
-												staffAsk.flag === 2 ?
-												"SMITH" :
-												"TRAINER")
-									),
-									30000,
-									3000
-								] :
-								[ name, row?.requestFee ?? 0 ]
-						),
-						layout.name,
-						full,
-						white,
-						{ hAlign: 1, vAlign: 0 }
-					)
-				);
-				button(
-					staffAsk ? "fortress-staff-yes" : "fortress-war-yes",
-					hudCopy( "UIIT_CTL_YES" ),
-					...layout.accept.slice( 0, 3 ) as [number, number, number]
-				);
-				button(
-					staffAsk ? "fortress-staff-no" : "fortress-war-no",
-					hudCopy( "UIIT_CTL_NO" ),
-					...layout.refuse.slice( 0, 3 ) as [number, number, number]
-				);
+				simpleMessageBox( {
+					title: hudCopy( "UIIT_STT_CONFIRM_BOX" ),
+					lines: message.split( "\n" ),
+					yes: staffAsk ? "fortress-staff-yes" : "fortress-war-yes",
+					no: staffAsk ? "fortress-staff-no" : "fortress-war-no"
+				} );
 			}
 			const jobAsk = jobHud.confirm(), aliasWindow = jobHud.alias();
 			if ( worldVisible && (jobAsk || aliasWindow) ) {
