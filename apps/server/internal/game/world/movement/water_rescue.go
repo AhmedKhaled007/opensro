@@ -120,6 +120,14 @@ func (v *WaterValidator) tileOnMainland(start globalTile, tilesPerAxis int, cach
 // is a legal stand when it is walkable mainland (the deck-trapped
 // character drops to the ground plane).
 //
+// A spawn inside a closed object (a tree trunk or a rock whose outline
+// blocks on every side, placementguard.go) is stranded too, and no rescue
+// lands inside one. Port-only, not native: an extension of the login rescue
+// above for BR-261014-1425-CE1E, where a player relogged into a trunk
+// forever. The origin tile is a candidate, so the rescue is the nearest
+// tile centre outside the object, tested at the height the rescue would
+// stand at. Only while SRO_CLOSED_OBJECT_RESCUE is on (SetClosedObjectRescue).
+//
 // Returns (result, stranded, rescueFound):
 //   - on the mainland or no walkability data -> (input, false, false);
 //     unknown never counts as stranded (fail-open, like every gate here).
@@ -163,11 +171,20 @@ func (v *WaterValidator) RelocateStrandedSpawn(spawn simulation.Spawn) (simulati
 		// bridge span - must not strand it.
 		return spawn, false, false
 	}
+	closedAsset, enclosed := 0, false
+	if v.closedObjectRescue {
+		closedAsset, enclosed = v.InsideClosedObject(spawn)
+	}
 	verdicts := map[uint64]bool{}
-	if deckVerdict == objectDeckNone && walkable && v.tileOnMainland(origin, tilesPerAxis, verdicts) {
+	if !enclosed && deckVerdict == objectDeckNone && walkable && v.tileOnMainland(origin, tilesPerAxis, verdicts) {
 		return spawn, false, false
 	}
 	startRadius := 1
+	if enclosed {
+		log.Infof("movement: enter-world spawn 0x%04X (%.1f, %.1f, %.1f) is inside closed object asset %d; relocating",
+			spawn.RegionID, spawn.X, spawn.Y, spawn.Z, closedAsset)
+		startRadius = 0
+	}
 	if deckVerdict == objectDeckSealed {
 		log.Infof("movement: enter-world spawn 0x%04X (%.1f, %.1f, %.1f) stands on a sealed object-nav deck; relocating",
 			spawn.RegionID, spawn.X, spawn.Y, spawn.Z)
@@ -192,6 +209,9 @@ func (v *WaterValidator) RelocateStrandedSpawn(spawn simulation.Spawn) (simulati
 				if !v.tileOnMainland(candidate, tilesPerAxis, verdicts) {
 					continue
 				}
+				if v.closedObjectRescue && v.rescueEnclosed(tileCenter(candidate, tilesPerAxis, tileSize), spawn.Y) {
+					continue
+				}
 				distSq := float64(dx*dx + dz*dz)
 				if distSq < bestDistSq {
 					bestDistSq = distSq
@@ -205,12 +225,51 @@ func (v *WaterValidator) RelocateStrandedSpawn(spawn simulation.Spawn) (simulati
 		return spawn, true, false
 	}
 
-	regionID := simulation.RegionIDForSectors(best.x/tilesPerAxis, best.z/tilesPerAxis)
-	localX := (float64(best.x%tilesPerAxis) + 0.5) * tileSize
-	localZ := (float64(best.z%tilesPerAxis) + 0.5) * tileSize
-	rescued := simulation.Spawn{RegionID: regionID, X: localX, Y: spawn.Y, Z: localZ, Angle: spawn.Angle}
-	if terrainY, ok := v.TerrainHeightAt(regionID, localX, localZ); ok {
-		rescued.Y = terrainY
-	}
+	rescued := v.rescueStand(tileCenter(best, tilesPerAxis, tileSize), spawn.Y)
+	rescued.Angle = spawn.Angle
 	return rescued, true, true
+}
+
+/*
+================
+rescueStand
+
+A rescue tile centre at the height it is placed at: the terrain there, or
+the stranded spawn's own height when the terrain has none.
+================
+*/
+func (v *WaterValidator) rescueStand(center simulation.Spawn, spawnY float64) simulation.Spawn {
+	center.Y = spawnY
+	if terrainY, ok := v.TerrainHeightAt(center.RegionID, center.X, center.Z); ok {
+		center.Y = terrainY
+	}
+	return center
+}
+
+/*
+================
+rescueEnclosed
+
+Whether a candidate tile centre, at the height rescueStand would place the
+player, is inside a closed object.
+================
+*/
+func (v *WaterValidator) rescueEnclosed(center simulation.Spawn, spawnY float64) bool {
+	_, inside := v.InsideClosedObject(v.rescueStand(center, spawnY))
+	return inside
+}
+
+/*
+================
+tileCenter
+
+The region-local x/z of a world-grid tile's centre (Y left 0).
+================
+*/
+func tileCenter(tile globalTile, tilesPerAxis int, tileSize float64) simulation.Spawn {
+	return simulation.Spawn{
+		RegionID: simulation.RegionIDForSectors(tile.x/tilesPerAxis, tile.z/tilesPerAxis),
+		X:        (float64(tile.x%tilesPerAxis) + 0.5) * tileSize,
+		Z:        (float64(tile.z%tilesPerAxis) + 0.5) * tileSize,
+	}
 }

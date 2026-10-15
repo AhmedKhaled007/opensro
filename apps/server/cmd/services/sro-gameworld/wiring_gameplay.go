@@ -242,6 +242,7 @@ func newGameplayPlane(
 	if err := water.ValidateSecurityAssets(); err != nil {
 		return nil, err
 	}
+	water.SetClosedObjectRescue(movement.ClosedObjectRescueFromEnv())
 	navigationStarted := time.Now()
 	navigationRegions, err := water.PreloadOutdoorNavigation()
 	if err != nil {
@@ -274,6 +275,7 @@ func newGameplayPlane(
 	items.ConstrainMovement = movementRuntime.ConstrainMovement
 	items.SpawnRegionAvailable = water.SpawnRegionAvailable
 	items.ConstrainCompanionSpawn = water.ConstrainCompanionSpawn
+	items.InsideClosedObject = water.InsideClosedObject
 	items.CompanionSurfaceHeight = water.WalkableSpawnHeightAt
 	items.ConstrainWalk = movementRuntime.ConstrainMovementFrom
 	items.PlanCompanionRoute = simulation.PetRouteFromMonster(water.PlanMonsterRoute)
