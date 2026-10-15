@@ -347,3 +347,51 @@ export function applyFriendEvent( rows: readonly FriendRow[], event: FriendEvent
 	if ( event.kind === "deleted" ) return rows.filter( row => row.jid !== event.jid );
 	return rows.map( row => row.jid === event.jid ? { ...row, online: event.online } : row );
 }
+
+/*
+================
+friendAddPrefill
+
+The name CIFFriend_OnAddButton (602010) puts in the add box: the selected
+target when it is another player, or the rider of a selected mounted pet
+or transport (the target has a player on it), else nothing.
+================
+*/
+export function friendAddPrefill(
+	target: number | undefined,
+	entities: readonly {
+		readonly gid: number;
+		readonly kind: string;
+		readonly name?: string;
+		readonly mountedOn?: number;
+	}[],
+	localGid: number | undefined
+): string {
+	if ( !target || target === localGid ) return "";
+	const selected = entities.find( entity => entity.gid === target );
+	if ( !selected ) return "";
+	if ( selected.kind === "player" ) return selected.name ?? "";
+	return entities.find( entity => entity.kind === "player" && entity.mountedOn === target )?.name ?? "";
+}
+
+/*
+================
+friendNameOrder
+
+The friend list's order (CIFFriend_SortAndFill 604FD0 through
+WString_Less 78EC00): a-z folded to A-Z only, then UTF-16 code units, a
+name before any longer name it begins. Native 78EC00 builds both keys in
+one uninitialised buffer without clearing it between them (two
+StringCchCatW, 78EC8F and 78ED0C), so it ends up ordering mostly by
+length; the port keeps the comparison it was written to make, not the bug.
+================
+*/
+export function friendNameOrder( a: string, b: string ): number {
+	const fold = ( c: number ) => c >= 0x61 && c <= 0x7a ? c - 0x20 : c;
+	const n = Math.min( a.length, b.length );
+	for ( let i = 0; i < n; i++ ) {
+		const d = fold( a.charCodeAt( i ) ) - fold( b.charCodeAt( i ) );
+		if ( d ) return d;
+	}
+	return a.length - b.length;
+}
