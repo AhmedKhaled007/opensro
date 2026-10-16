@@ -211,6 +211,11 @@ export const EXPERIMENTAL_TABS: readonly {
 			id: "experimental-drop-on-bag-tab",
 			label: "Drop on bag tabs",
 			description: "Drop an item on a bag tab to move it to that page."
+		}, {
+			key: "confirmGuildBan",
+			id: "experimental-confirm-guild-ban",
+			label: "Confirm guild ban",
+			description: "Ask before Withdraw bans a guild member."
 		} ]
 	}
 ];

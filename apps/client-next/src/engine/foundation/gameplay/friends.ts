@@ -22,6 +22,7 @@ frame rather than guessing.
 
 ===========================================================================
 */
+import { type TargetEntity, targetPlayer } from "./target-player";
 import type { WireFrame } from "@/engine/contracts/network";
 
 export const FRIEND_ROSTER_OPCODE = 0x3769;
@@ -353,25 +354,15 @@ export function applyFriendEvent( rows: readonly FriendRow[], event: FriendEvent
 friendAddPrefill
 
 The name CIFFriend_OnAddButton (602010) puts in the add box: the selected
-target when it is another player, or the rider of a selected mounted pet
-or transport (the target has a player on it), else nothing.
+player, or the rider of a selected mounted pet (target-player.ts).
 ================
 */
 export function friendAddPrefill(
 	target: number | undefined,
-	entities: readonly {
-		readonly gid: number;
-		readonly kind: string;
-		readonly name?: string;
-		readonly mountedOn?: number;
-	}[],
+	entities: readonly TargetEntity[],
 	localGid: number | undefined
 ): string {
-	if ( !target || target === localGid ) return "";
-	const selected = entities.find( entity => entity.gid === target );
-	if ( !selected ) return "";
-	if ( selected.kind === "player" ) return selected.name ?? "";
-	return entities.find( entity => entity.kind === "player" && entity.mountedOn === target )?.name ?? "";
+	return targetPlayer( target, entities, localGid )?.name ?? "";
 }
 
 /*

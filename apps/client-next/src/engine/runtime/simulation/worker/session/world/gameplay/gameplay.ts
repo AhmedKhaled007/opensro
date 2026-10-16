@@ -13,7 +13,7 @@ commands and cannot bypass actor eligibility.
 // player to trade.
 const ACTION_EXCHANGE = 1006;
 import { defaultUiTuning, type UiTuning, uiTuningFrom } from "@/engine/foundation/ui/ui-tuning";
-import { guildSoldierRefusal } from "@/engine/foundation/gameplay/guild-manager";
+import { guildBanRefused, guildSoldierRefusal } from "@/engine/foundation/gameplay/guild-manager";
 import { advanceGuildWarClock } from "@/engine/foundation/gameplay/guild-war";
 import {
 	ACTION_FORTRESS_RETURN,
@@ -316,6 +316,9 @@ const ITEM_INTERACTION_REFUSAL = 0x35;
 // 6FCD50's skill-use notices: category 4, code 0x21 refuses a rider.
 const SKILL_NOTICE_CATEGORY = 4;
 const SKILL_RIDING_REFUSAL = 0x21;
+// The guild notices' category; 0x1F refuses a ban of the master or oneself.
+const GUILD_NOTICE_CATEGORY = 0x10;
+const GUILD_BAN_REFUSED = 0x1f;
 // Server 0x3011 (529D6D), the victim's death kind; CPSMission 74FE50 here.
 const DEATH_NOTICE = 0x37ce;
 // 75B8D0: the transport bag's trade level [u8].
@@ -2138,6 +2141,14 @@ state here before a command can claim a native wire conversation.
 				// then contents, before composing the guild notice request.
 				if ( command.kind === "guild-notice" && (!command.subject || !command.contents) ) {
 					const notice = constantNativeNotice( 0x10, !command.subject ? 0x22 : 0x23 );
+					if ( notice ) notices = [ ...notices.slice( -99 ), { ...notice, sequence: ++noticeSequence } ];
+					dirty = true;
+					return null;
+				}
+				if (
+					command.kind === "guild-kick" && guildBanRefused( social.guild, social.localName, command.name )
+				) {
+					const notice = constantNativeNotice( GUILD_NOTICE_CATEGORY, GUILD_BAN_REFUSED );
 					if ( notice ) notices = [ ...notices.slice( -99 ), { ...notice, sequence: ++noticeSequence } ];
 					dirty = true;
 					return null;

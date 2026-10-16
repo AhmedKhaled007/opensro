@@ -263,6 +263,7 @@ import { createUnionHud } from "./hud/union-hud";
 import { createGuildWarHud } from "./hud/guild-war-hud";
 import { guildWarRequest, warScoreLimits, WAR_MAX_STAKE, WAR_UNLIMITED } from "@/engine/foundation/gameplay/guild-war";
 import { guildSelf } from "@/engine/foundation/gameplay/social-roster";
+import { targetPlayer } from "@/engine/foundation/gameplay/target-player";
 import { createExchangeHud } from "./hud/exchange-hud";
 import {
 	createStallHud,
@@ -317,6 +318,7 @@ import {
 	grantableAvatarPart
 } from "@/engine/foundation/gameplay/avatar-magic-option";
 import {
+	guildBanRefused,
 	guildLevelUpPrice,
 	guildManagerRows,
 	guildTransferRefusal,
@@ -729,6 +731,22 @@ const FORTRESS_TAX_ARROW_RIGHT = 270;
 const FORTRESS_TAX_TRAVEL = 234;
 // CIFJobRank and CIFJobContributionRank share one panel (job-hud.ts).
 const JOB_RANK_PANEL = "Job ranking";
+// The guild window's command button 102 and the notice the window's ban
+// raises for the master or oneself (5E4C30 → 703DD0: 0x10/0x1F).
+const GUILD_AUTHORITY_BUTTON = 102;
+
+/*
+================
+authorityLabel
+
+CIFGuildMember_RefreshButtons (5E1E80) relabels the authority button: the
+master gives authority (UIIT_CTL_GUILD_UNION_CHAT_GRANT), a member checks
+it (…_CONFIRM); the layout's UIIT_CTL_AUTHORITY_GRANT never shows.
+================
+*/
+function authorityLabel( master: boolean ): string {
+	return master ? "UIIT_CTL_GUILD_UNION_CHAT_GRANT" : "UIIT_CTL_GUILD_UNION_CHAT_CONFIRM";
+}
 // CIFNpcTalk_AppendFortressServiceRows (5D7AD0) and the employ question
 // (5D3880) quote one fee for every fortress staff member: 0x7530 gold and
 // 0xBB8 guild points.
@@ -3441,11 +3459,23 @@ export function createUi(
 		} else if ( id === "party-leave" ) {
 			// The social window's leave asks nothing, as the party window's does.
 			sendGameplay( { kind: id } );
-		} else if ( [ "party-kick", "guild-leave", "guild-dissolve", "guild-kick" ].includes( id ) ) {
-			// The question box below (socialQuestion) asks first; a ban needs a
-			// selected member to name.
-			const member = view.gameplay?.social?.guild?.members.find( m => m.id === socialMember );
-			if ( id !== "guild-kick" || member ) confirmSocial = id;
+		} else if ( id === "guild-kick" ) {
+			// 5E4C30 slot 2 → 703DD0 sends the ban on the click. With no member
+			// selected nothing happens; the worker refuses the master or oneself
+			// (guildBanRefused) with its 0x10 notice, before any question.
+			// Port-only, not native: the Experimental "Confirm guild ban" row
+			// (on by default, the owner's choice 2026-10-15) asks first.
+			const social = view.gameplay?.social;
+			const member = social?.guild?.members.find( m => m.id === socialMember );
+			if ( !member ) return;
+			if (
+				experimental.state().saved.confirmGuildBan &&
+				!guildBanRefused( social?.guild ?? null, social?.localName ?? "", member.name )
+			) confirmSocial = id;
+			else sendGameplay( { kind: "guild-kick", name: member.name } );
+		} else if ( [ "party-kick", "guild-leave", "guild-dissolve" ].includes( id ) ) {
+			// The question box below (socialQuestion) asks first.
+			confirmSocial = id;
 		} else if ( id === "social-confirm-yes" ) {
 			const gid = view.gameplay?.target ?? 0,
 				member = view.gameplay?.social?.guild?.members.find( m => m.id === socialMember );
@@ -3460,11 +3490,15 @@ export function createUi(
 			confirmSocial = "";
 		} else if ( id === "guild-create" ) {
 			sendGameplay( { kind: id, gid: view.gameplay?.target ?? 0, name: socialName } );
-		} else if ( id === "guild-invite" && view.gameplay?.target ) {
-			sendGameplay( { kind: id, gid: view.gameplay.target } );
+		} else if ( id === "guild-invite" ) {
+			// 700B50(0): the selected player, or the rider of a selected mounted pet;
+			// nothing for oneself or anything else (target-player.ts).
+			const player = targetPlayer( view.gameplay?.target, view.entities ?? [], view.gameplay?.localGid );
+			if ( player ) sendGameplay( { kind: id, gid: player.gid } );
 		} else if ( id === "guild-union-invite" ) {
 			// 701190 sends the selected player (a mounted COS stands for its rider).
-			if ( view.gameplay?.target ) sendGameplay( { kind: id, gid: view.gameplay.target } );
+			const player = targetPlayer( view.gameplay?.target, view.entities ?? [], view.gameplay?.localGid );
+			if ( player ) sendGameplay( { kind: id, gid: player.gid } );
 		} else if ( id === "stall-chat-send" ) {
 			const text = stallHud.chat();
 			if ( text.trim() && !view.gameplay?.chat?.pending && view.gameplay?.stall?.phase !== "none" ) {
@@ -17643,7 +17677,9 @@ export function createUi(
 										true :
 										self?.grade === 0 && (number !== 105 || guild.level >= 4);
 								command(
-									at( page, number ),
+									number === GUILD_AUTHORITY_BUTTON ?
+										{ ...at( page, number ), text: authorityLabel( self?.grade === 0 ) } :
+										at( page, number ),
 									[
 										left + (i % actionColumns) * (inner / actionColumns),
 										actionTop + Math.floor( i / actionColumns ) * 26,
@@ -18288,6 +18324,8 @@ export function createUi(
 										if ( guildNoticeHud.isOpen() && id !== 45 && id !== 62 ) continue;
 										const node = id === 105 ?
 											{ ...at( id ), rect: [ 353, 223, 0, 0 ] as UiRect } :
+											id === GUILD_AUTHORITY_BUTTON ?
+											{ ...at( id ), text: authorityLabel( self?.grade === 0 ) } :
 											at( id );
 										const allowed = id === 45 ?
 											!!self :
