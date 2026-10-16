@@ -134,7 +134,7 @@ import { MALL_NOTIFY_HEIGHT, MALL_NOTIFY_WIDTH, mallNotifyOrigin } from "@/engin
 import { jobContributionSelf, jobRankPage, jobRankPages } from "@/engine/foundation/gameplay/job-rank";
 import { createMapTeleport } from "./hud/map-teleport";
 import { SkillSlot_Resolve } from "./hud/skill-slot";
-import { academyRank } from "@/engine/foundation/gameplay/academy";
+import { ACADEMY_OPEN_LEVEL, academyRank } from "@/engine/foundation/gameplay/academy";
 import { createWindowPlacement } from "./hud/window-placement";
 import { createItemMall } from "./hud/item-mall";
 import {
@@ -1131,6 +1131,9 @@ export function createUi(
 	const hudMessages = createHudMessages( chooseTip );
 	const speech = createSpeech();
 	let academyWasVisible = false;
+	// The last AcademyState.opened seen: an accepted opening (0xB2EC [1])
+	// opens the Academy tab (76FBA0 -> CGInterface_OpenAcademyTab 69C810).
+	let academyOpenedSeen = 0;
 	const hud = createHudResources( assets, base ),
 		guideResources = createGuideResources( assets, base ),
 		minimapResources = createMinimapResources( assets, base ),
@@ -2941,6 +2944,14 @@ export function createUi(
 				storagePanel.reset();
 				setPanel( "Storage" );
 			}
+			dirty = true;
+			return;
+		}
+		if ( id === "npc-academy-open" ) {
+			// 5DA1B0 case 0x2D: the fee question (5D3880 type 6).
+			const conversation = view.gameplay?.npcConversation;
+			if ( !conversation || conversation.phase !== "menu" ) return;
+			jobHud.ask( "academy-open", conversation.gid, 0 );
 			dirty = true;
 			return;
 		}
@@ -5374,7 +5385,9 @@ export function createUi(
 						sendGameplay(
 							asked.kind === "join" ?
 								{ kind: "job-join", gid: asked.npc, job: asked.job } :
-								{ kind: "job-withdraw", gid: asked.npc }
+								asked.kind === "withdraw" ?
+								{ kind: "job-withdraw", gid: asked.npc } :
+								{ kind: "academy-open" }
 						);
 					}
 					return;
@@ -7604,6 +7617,11 @@ export function createUi(
 					next.gameplay.npcConversation.gid :
 					undefined
 			);
+			const academyOpened = next.gameplay?.academy?.opened ?? 0;
+			if ( academyOpened !== academyOpenedSeen ) {
+				academyOpenedSeen = academyOpened;
+				if ( academyOpened > 0 && setPanel( "Academy", "open" ) ) dirty = true;
+			}
 			// A collected outcome closes the talk (75D5C0); a rank answer opens its window.
 			jobHud.observeChecked( next.gameplay?.jobAliasChecked );
 			if ( jobHud.observe( next.gameplay?.jobRanks?.opened, next.gameplay?.jobOutcome ) ) {
@@ -14373,6 +14391,10 @@ export function createUi(
 						canRecall: !!(capabilities & 0x40),
 						canReverseReturn: !!(capabilities & 0x20000000),
 						canStorage: !!(capabilities & 4),
+						// 5D9100: the TC manager's +0x20 (set by any camp record)
+						// is clear and the player is level 60 or more.
+						canAcademyOpen: !!(capabilities & 4) && !game.academy?.member &&
+							(game.progression?.level ?? 0) >= ACADEMY_OPEN_LEVEL,
 						canFortressOfficial: !!(capabilities & 0x800000),
 						canFortressManager: !!(capabilities & 0x400000) &&
 							(fortressStaffView().holder || fortressStaffView().ally),
@@ -20735,7 +20757,7 @@ export function createUi(
 				endWindow( admission, "service:" + JOB_ALIAS_PANEL );
 			}
 			if ( worldVisible && (jobAsk || aliasWindow?.confirming) ) {
-				// 5D26F0's question boxes (types 4 and 5) and the alias window's
+				// 5D26F0's question boxes (types 4, 5 and 6) and the alias window's
 				// confirm (646470). CIFSimpleMessageBox_SetTextAndResize (52DB20):
 				// SML2 text renders as markup (centred lines, breaks), never as raw
 				// tags. The alias texts take 646470's arguments with the checked
@@ -20745,7 +20767,9 @@ export function createUi(
 						jobAsk ?
 							(jobAsk.kind === "join" ?
 								"UIIT_STT_JOBGUILD_JOIN_WINDOW" :
-								"UIIT_STT_JOBGUILD_WITHD_WINDOW") :
+								jobAsk.kind === "withdraw" ?
+								"UIIT_STT_JOBGUILD_WITHD_WINDOW" :
+								"UIIT_MSG_TC_TRAININGCAMP_OPEN") :
 							aliasWindow?.modify ?
 							"UIIT_STT_ALIAS_MODIFY_WINDOW" :
 							"UIIT_STT_ALIAS_CREATE_WINDOW"

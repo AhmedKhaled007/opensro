@@ -141,6 +141,7 @@ means a second Handle(0x3393) would BREAK party and guild consent).
 func (r *InviteRuntime) Register(hub *transport.Hub) {
 	hub.Handle(OpTCInviteRequest, r.handleInvite)
 	hub.Handle(OpTCNoticeEditRequest, r.handleNoticeEdit)
+	hub.Handle(OpTCOpenRequest, r.handleOpen)
 }
 
 // PendingInviteCount reports the number of outstanding invitations (the
@@ -342,14 +343,14 @@ handleInvite
 
 handleInvite applies one 0x76B1 proposal: the actor must be a
 recognizable camp MASTER (level >= 0x3c - the sub_81e9f0 kind-0 gate
-the client's own master-is-me path depends on - and, when a camp
-already exists, its kind-0 master with student headroom), the target
+the client's own master-is-me path depends on - and the kind-0 master
+of a camp opened at the NPC, with student headroom), the target
 must resolve by world gid within the actor's division, be someone
 else, not delete-pending, ONLINE (the prompt needs a live session),
 campless and inside the student band. Then the target gets the 0x3393
 type-9 prompt and the proposal parks in the pending table - NOTHING
-commits here; the camp (when absent) and the membership move only
-when the target's accept consent arrives. Every refusal stays silent
+commits here; the membership moves only when the target's accept
+consent arrives. Every refusal stays silent
 (no invite-request refusal carrier is pinned toward the actor).
 ==================
 */
@@ -381,24 +382,28 @@ func (r *InviteRuntime) handleInvite(s *transport.Session, opcode uint16, payloa
 		log.Debugf("mentor: 0x76B1 (invite) refused for %s: level %d below the 0x3c master band", actor.Name, characterLevel(actor))
 		return
 	}
-	campID := int64(0)
-	if existingID, joined := r.deps.TrainingCampAuthority().CampOfCharacter(divisionID, actor.ID); joined {
-		camp, members, ok := r.deps.TrainingCampAuthority().Camp(divisionID, existingID)
-		if !ok {
-			log.Debugf("mentor: 0x76B1 (invite) refused for %s: camp %d resolves to no stored row", actor.Name, existingID)
-			return
-		}
-		if camp.MasterCharID != actor.ID {
-			// A sub-mentor/student cannot invite - the client gates the
-			// button on master-is-me (sub_5c4fd0 @0x005c5033).
-			log.Debugf("mentor: 0x76B1 (invite) refused for %s: not the master of camp %d", actor.Name, existingID)
-			return
-		}
-		if countCampKind(members, MemberKindStudent) >= CampStudentCap {
-			log.Debugf("mentor: 0x76B1 (invite) refused for %s: camp %d sits at the %d-student cap", actor.Name, existingID, CampStudentCap)
-			return
-		}
-		campID = existingID
+	campID, joined := r.deps.TrainingCampAuthority().CampOfCharacter(divisionID, actor.ID)
+	if !joined {
+		// A camp is opened at the storage NPC (open.go). The client's Invite
+		// button needs master-is-me (sub_5c4fd0 @0x005c5033), which only a
+		// camp seed arms, so a campless frame is a desync or forged.
+		log.Debugf("mentor: 0x76B1 (invite) refused for %s: no camp opened", actor.Name)
+		return
+	}
+	camp, members, ok := r.deps.TrainingCampAuthority().Camp(divisionID, campID)
+	if !ok {
+		log.Debugf("mentor: 0x76B1 (invite) refused for %s: camp %d resolves to no stored row", actor.Name, campID)
+		return
+	}
+	if camp.MasterCharID != actor.ID {
+		// A sub-mentor/student cannot invite - the client gates the
+		// button on master-is-me (sub_5c4fd0 @0x005c5033).
+		log.Debugf("mentor: 0x76B1 (invite) refused for %s: not the master of camp %d", actor.Name, campID)
+		return
+	}
+	if countCampKind(members, MemberKindStudent) >= CampStudentCap {
+		log.Debugf("mentor: 0x76B1 (invite) refused for %s: camp %d sits at the %d-student cap", actor.Name, campID, CampStudentCap)
+		return
 	}
 	target := findCampCharacterByGid(r.deps, divisionID, targetRef)
 	if target == nil {
@@ -442,7 +447,7 @@ func (r *InviteRuntime) handleInvite(s *transport.Session, opcode uint16, payloa
 		CampID:      campID,
 	})
 	_ = targetSession.Send(OpInvitationProposal, EncodeInvitePrompt3393(enterworld.ObjectIDForCharacter(actor), actor.Name))
-	log.Debugf("mentor: %s proposed academy membership to %s (camp %d; 0 = to be created) - type-9 prompt sent", actor.Name, target.Name, campID)
+	log.Debugf("mentor: %s proposed academy membership to %s (camp %d) - type-9 prompt sent", actor.Name, target.Name, campID)
 }
 
 /*
@@ -466,10 +471,8 @@ the wire except the ONE pinned-carrier notice:
     re-validates every membership, lifecycle, level, and capacity edge.
 
 On the committed accept the joiner receives their own 0x3AC5
-status-10 sub-1 seed (their client holds no camp state), every OTHER
-sitting online member the status-2 join row - and when the commit
-CREATED the camp, the master receives their own seed too (their
-client was campless until this very commit).
+status-10 sub-1 seed (their client holds no camp state) and every OTHER
+sitting online member, the master included, the status-2 join row.
 ==================
 */
 func (r *InviteRuntime) ApplyConsent(s *transport.Session, divisionID string, actor *enterworld.Character, result, code uint8) {
@@ -525,7 +528,6 @@ func (r *InviteRuntime) ApplyConsent(s *transport.Session, divisionID string, ac
 		return
 	}
 	campID := admission.Camp.ID
-	created := admission.Created
 	joined := admission.Members
 	rows := r.campWireRows(divisionID, joined)
 	joinerWireRow := r.memberWireRow(divisionID, joinerRow)
@@ -543,16 +545,9 @@ func (r *InviteRuntime) ApplyConsent(s *transport.Session, divisionID string, ac
 		if !live {
 			continue
 		}
-		if created && member.CharID == inviter.ID {
-			// A freshly created camp: the master's client was campless
-			// until this commit, so they need their OWN seed - the
-			// join row would land on an empty mirror.
-			_ = peer.Send(OpTCStatus, EncodeCampSeed3AC5(enterworld.ObjectIDForCharacter(character), admission.Camp.Subject, admission.Camp.Contents, rows))
-			continue
-		}
 		_ = peer.Send(OpTCStatus, joinPush)
 	}
-	log.Debugf("mentor: %s joined %s's academy (camp %d, %d member(s), created=%v)", actor.Name, inviter.Name, campID, len(joined), created)
+	log.Debugf("mentor: %s joined %s's academy (camp %d, %d member(s))", actor.Name, inviter.Name, campID, len(joined))
 }
 
 /*

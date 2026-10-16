@@ -1,3 +1,13 @@
+/*
+===========================================================================
+
+wire.go - the academy lane's wire: opcodes, constants and encoders
+
+The 0x3393 type-9 prompt, the 0x3AC5 status rows and the camp record the
+seed and the 0xB2EC opening share.
+
+===========================================================================
+*/
 // Package mentor is the MENTOR / TRAINING-CAMP (academy) lane: the
 // type-9 arm of the shared 0x3393 invitation multiplex - the LAST of the
 // three consent arms (party type 1, guild type 5, mentor/TC type 9).
@@ -22,15 +32,12 @@
 // memberships; join/leave ride SendOlappedTrainingCampJobReqToSM
 // (@0x005df688 "can't find training camp to join!").
 //
-// DECISION (documented frontier): v1.150 exposes NO dedicated
-// "open camp" C->S opcode - the client's whole TC send surface is
-// 0x76B1 invite + 0x77C5/0x7785/0x710A/0x74D4/0x736D/0x7220 lifecycle
-// (apprenticePlane.ts) and the mentor-match listing family - so the
-// camp comes into being ATOMICALLY with its first accepted invitation
-// (AdmitStudent installs the master's kind-0 row and the joiner's row in
-// one commit). The retail open trigger (the UIIT_MSG_TC_ERROR_OPEN_
-// LEVEL / OPEN_GOLD refusals name an "establish" action) is unpinned in
-// both dumps; no trigger is invented for it.
+// A camp is opened at the storage NPC (open.go: 0x72EC -> 0xB2EC, the
+// client's "Academy Establishment" row 0x2D) and only its master invites
+// into it; an invitation or a match join never creates a camp. (An earlier
+// note here held that v1.150 had no opening opcode and created the camp
+// with the first accepted invitation; 5D9100 / 5D26F0 / 702BD0 show the
+// opening, so that path is gone.)
 //
 // Refusals DEFAULT to SILENT (the guild-invite posture). ONE refusal
 // answer is composed: the inviter's rejection notice 0x3AC5
@@ -259,6 +266,15 @@ func EncodeCampSeed3AC5(localMemberID uint32, subject, contents string, rows []M
 	writer := wire.NewWriter(128)
 	writer.U8(10)
 	writer.U8(1)
+	writeCampRecord(writer, localMemberID, subject, contents, rows)
+	return writer.Payload()
+}
+
+// writeCampRecord appends the camp record 82AA10 reads, shared by the
+// status-10 seed and the 0xB2EC opening answer: {u32 localMemberId}
+// {16-byte blob}{u8 statusByte}{str subject}{str contents}{u8 rosterCount}
+// {member rows}.
+func writeCampRecord(writer *wire.Writer, localMemberID uint32, subject, contents string, rows []MemberWireRow) {
 	writer.U32(localMemberID)
 	for i := 0; i < 16; i++ {
 		writer.U8(0)
@@ -270,7 +286,6 @@ func EncodeCampSeed3AC5(localMemberID uint32, subject, contents string, rows []M
 	for _, row := range rows {
 		writeMemberRow(writer, row)
 	}
-	return writer.Payload()
 }
 
 // EncodeCampNotice3AC5 renders the status-10 sub-2 notice: {u8 10}

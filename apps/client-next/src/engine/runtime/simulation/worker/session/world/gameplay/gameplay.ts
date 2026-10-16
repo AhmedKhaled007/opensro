@@ -167,10 +167,12 @@ import {
 	type SystemNotice
 } from "@/engine/foundation/gameplay/system-notices";
 import {
+	ACADEMY_OPEN_FEE,
 	academyBootstrap,
 	academyRequest,
 	academyPacket,
-	academyNoticeRequest
+	academyNoticeRequest,
+	academyOpenRequest
 } from "@/engine/foundation/gameplay/academy";
 import { academyAcknowledgment } from "@/engine/foundation/gameplay/academy-notices";
 import { pkStatusBootstrap, pkStatusPacket } from "@/engine/foundation/gameplay/pk-status";
@@ -1877,6 +1879,21 @@ state here before a command can claim a native wire conversation.
 				dirty = true;
 				return null;
 			}
+			if ( command.kind === "academy-open" ) {
+				if ( !academy || !localGid ) throw Error( "Academy session is not initialized" );
+				// 5D26F0 case 6: the confirm's Yes prints OPEN_GOLD and sends
+				// nothing while the balance is under the fee.
+				if ( BigInt( progression.gold ?? "0" ) < BigInt( ACADEMY_OPEN_FEE ) ) {
+					notices = [ ...notices.slice( -99 ), {
+						key: "UIIT_MSG_TC_ERROR_OPEN_GOLD",
+						value: 0,
+						sequence: ++noticeSequence
+					} ];
+					dirty = true;
+					return null;
+				}
+				return sendFrame( academyOpenRequest() );
+			}
 			if ( command.kind === "academy-page" || command.kind === "academy-join" ) {
 				if ( !academy || !localGid ) throw Error( "Academy session is not initialized" );
 				const next = academyRequest( academy, command, progression.level );
@@ -2985,6 +3002,16 @@ Packet handling must not depend on which HUD panel is currently open.
 						// 769C6B / 769DA3: matching failures use academy category 1D.
 						if ( (frame.opcode === 0xb701 || frame.opcode === 0xb592) && frame.payload[0] === 2 ) {
 							const notice = constantNativeNotice( 0x1d, frame.payload[1]! );
+							if ( notice ) {
+								notices = [ ...notices.slice( -99 ), { ...notice, sequence: ++noticeSequence } ];
+							}
+						}
+						// 76FBA0: an opening prints OPEN_SUCCESS to chat; a refusal
+						// goes through the category-0x1D dispatcher.
+						if ( frame.opcode === 0xb2ec ) {
+							const notice = frame.payload[0] === 1 ?
+								{ key: "UIIT_MSG_TC_OPEN_SUCCESS", value: 0 } :
+								constantNativeNotice( 0x1d, frame.payload[1]! );
 							if ( notice ) {
 								notices = [ ...notices.slice( -99 ), { ...notice, sequence: ++noticeSequence } ];
 							}

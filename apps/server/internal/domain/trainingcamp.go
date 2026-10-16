@@ -1,3 +1,13 @@
+/*
+===========================================================================
+
+trainingcamp.go - training-camp records and the store door contract
+
+The camp row, its member rows, and the policy inputs and results of the
+store door's opening and admission commands.
+
+===========================================================================
+*/
 package domain
 
 // Training-camp (mentor/academy) records + the store door contract.
@@ -42,8 +52,9 @@ type TrainingCampMemberRecord struct {
 }
 
 // TrainingCampAdmission is the complete policy input for admitting one
-// student. ExpectedCampID is zero when the command expects to create the
-// master's camp; otherwise the master must still own that exact camp.
+// student. ExpectedCampID names the camp the master opened at the NPC
+// (OpenCamp); the master must still own that exact camp. An admission never
+// creates a camp: v1.150 opens one only through the NPC's 0x72EC.
 //
 // The level and capacity values are supplied by the gameplay package because
 // they are protocol/version policy. The authority store applies them while it
@@ -62,7 +73,43 @@ type TrainingCampAdmission struct {
 type TrainingCampAdmissionResult struct {
 	Camp    TrainingCampRecord
 	Members []TrainingCampMemberRecord
-	Created bool
+}
+
+// TrainingCampOpening is the policy input for opening a camp at the NPC
+// (v1.188 4E4680 -> 5DFCC0): the master's level floor and the gold fee the
+// opening burns. The gameplay package supplies both; the store applies them
+// with the debit and the new rows under one lock.
+type TrainingCampOpening struct {
+	MasterCharID int64
+	MinLevel     int64
+	Fee          int64
+}
+
+// TrainingCampOpenRefusal is why OpenCamp refused. The gameplay package maps
+// each to the v1.150 category-0x1D code the 0xB2EC answer carries.
+type TrainingCampOpenRefusal uint8
+
+const (
+	TrainingCampOpenAccepted TrainingCampOpenRefusal = iota
+	// TrainingCampOpenUnavailable: no such live character, or one pending
+	// deletion. No answer names it.
+	TrainingCampOpenUnavailable
+	// TrainingCampOpenDead: 4E4680's IsAlive test (0x6807).
+	TrainingCampOpenDead
+	// TrainingCampOpenLevel: below the level floor (0x6809).
+	TrainingCampOpenLevel
+	// TrainingCampOpenGold: less gold than the fee (0x680A).
+	TrainingCampOpenGold
+	// TrainingCampOpenInCamp: already a member of a camp (0x6812).
+	TrainingCampOpenInCamp
+)
+
+// TrainingCampOpenResult is the committed opening: the new camp, its one
+// master row, and the master's gold after the fee.
+type TrainingCampOpenResult struct {
+	Camp    TrainingCampRecord
+	Members []TrainingCampMemberRecord
+	Gold    int64
 }
 
 // TrainingCampStore is the authority store's training-camp door (the
@@ -78,11 +125,15 @@ type TrainingCampStore interface {
 	// (master included - the master is a kind-0 member row), resolved
 	// from the stored member sets.
 	CampOfCharacter(divisionID string, characterID int64) (int64, bool)
-	// AdmitStudent is the sole camp-topology command. It validates the
-	// expected create/existing-camp state, master ownership, both live
-	// character records, lifecycle and level policy, student uniqueness,
-	// and capacity under one authority lock, then creates the camp or
-	// appends the student in one transaction.
+	// OpenCamp opens the master's camp at the NPC: it checks the live
+	// character, level and gold and that no camp holds the master, then
+	// burns the fee and installs the camp row and its kind-0 master row in
+	// one transaction.
+	OpenCamp(divisionID string, opening TrainingCampOpening) (TrainingCampOpenResult, TrainingCampOpenRefusal)
+	// AdmitStudent appends one student to the master's existing camp. It
+	// validates the expected camp, master ownership, both live character
+	// records, lifecycle and level policy, student uniqueness and capacity
+	// under one authority lock, then commits in one transaction.
 	AdmitStudent(divisionID string, admission TrainingCampAdmission) (TrainingCampAdmissionResult, bool)
 	// UpdateNotice rechecks the expected camp and kind-0 author under the
 	// authority lock, persists the notice, and returns a detached snapshot.

@@ -1,3 +1,15 @@
+/*
+===========================================================================
+
+e2e_invite_wire_test.go - the academy opening and invitation handshake
+over the real transport
+
+Drives the 0x72EC opening and the 0x76B1 / 0x3393 invitation against the
+real authority store, with the party and guild lanes wired as in
+wiring.go.
+
+===========================================================================
+*/
 package mentor_test
 
 // End-to-end exercise of the mentor/TC INVITE HANDSHAKE (T62) over the
@@ -20,11 +32,14 @@ package mentor_test
 //	               pinned refusal carrier;
 //	inviter gone-> M disconnecting mid-prompt invalidates S's accept
 //	               (the consent-time re-validation);
+//	open        -> a campless master's invite refuses silently; M's
+//	               0x72EC answers 0xB2EC {2, 0x0A} short of the fee,
+//	               then {1}+the camp record and the gold refresh, and
+//	               a second opening {2, 0x12};
 //	accept      -> {01 01} commits through the ATOMIC AdmitStudent door
-//	               (the camp is born with its first accepted
-//	               invitation): S receives their 0x3AC5 status-10 sub-1
-//	               seed and M - whose client was campless until this
-//	               commit - their own seed, both byte-asserted;
+//	               into M's opened camp: S receives their 0x3AC5
+//	               status-10 sub-1 seed and M the status-2 join row,
+//	               both byte-asserted;
 //	re-invite   -> a camped target refuses silently;
 //	second join -> O's accept rides AdmitStudent: O gets the seed,
 //	               M and S the status-2 join row, all byte-asserted;
@@ -426,6 +441,31 @@ func campSeedWithNoticeOracle(localMemberID uint32, members []campE2EMember, sub
 	return buf.Bytes()
 }
 
+// campOpenAckOracle hand-rolls the 0xB2EC success answer: {u8 1} and the
+// camp record the status-10 seed carries after its two status bytes.
+func campOpenAckOracle(localMemberID uint32, members []campE2EMember) []byte {
+	return append([]byte{1}, campSeedOracle(localMemberID, members)[2:]...)
+}
+
+// campOpenCamp gives the master the fee, sends 0x72EC as 702BD0 composes it
+// (one u32: the confirm box's UI id, which the server ignores), and asserts
+// the byte-exact 0xB2EC camp record and the 0x30B3 refresh of the balance
+// left after the fee.
+func campOpenCamp(t *testing.T, c *websocket.Conn, authority *store.Store, master *enterworld.Character, level uint8) {
+	t.Helper()
+	gold := int64(mentor.CampOpenFee + 7)
+	authority.MutateCharacter(master, "test-open-fee", func() { master.Gold = &gold })
+	campSendFrame(t, c, mentor.OpTCOpenRequest, campU32(0x2710))
+	gid := enterworld.ObjectIDForCharacter(master)
+	roster := []campE2EMember{{gid: gid, name: master.Name, kind: mentor.MemberKindMaster, level: level}}
+	if got, want := campExpectFrame(t, c, mentor.OpTCOpenAnswer, "0xB2EC open answer"), campOpenAckOracle(gid, roster); !bytes.Equal(got, want) {
+		t.Fatalf("0xB2EC = % X, want % X", got, want)
+	}
+	if got, want := campExpectFrame(t, c, 0x30B3, "gold after the fee"), []byte{1, 7, 0, 0, 0, 0, 0, 0, 0, 0}; !bytes.Equal(got, want) {
+		t.Fatalf("0x30B3 = % X, want % X", got, want)
+	}
+}
+
 // campJoinOracle hand-rolls the 0x3AC5 status-2 joining-member push.
 func campJoinOracle(member campE2EMember) []byte {
 	buf := &bytes.Buffer{}
@@ -538,6 +578,27 @@ func TestMentorInviteConsentEndToEndOverWire(t *testing.T) {
 	campHelloWS(t, connV)
 	campEnterWorld(t, connV, campE2ENameV)
 
+	// ---- a camp is opened at the NPC, never by an invitation ----
+	campSendFrame(t, connM, mentor.OpTCInviteRequest, campU32(gidS))
+	campElicitGuildRefusal(t, connM, "campless invite elicitation")
+	if got := first.mentorInv.PendingInviteCount(); got != 0 {
+		t.Fatalf("a campless master's invite parked %d proposal(s)", got)
+	}
+	short := int64(mentor.CampOpenFee - 1)
+	first.authority.MutateCharacter(master, "test-short-fee", func() { master.Gold = &short })
+	campSendFrame(t, connM, mentor.OpTCOpenRequest, campU32(0x2710))
+	if got := campExpectFrame(t, connM, mentor.OpTCOpenAnswer, "short-fee answer"); !bytes.Equal(got, []byte{2, mentor.OpenErrGold}) {
+		t.Fatalf("short-fee 0xB2EC = % X", got)
+	}
+	campOpenCamp(t, connM, first.authority, master, 60)
+	// 4E4680 tests the gold before the camp, so the second try pays again.
+	refill := int64(mentor.CampOpenFee)
+	first.authority.MutateCharacter(master, "test-refill", func() { master.Gold = &refill })
+	campSendFrame(t, connM, mentor.OpTCOpenRequest, campU32(0x2710))
+	if got := campExpectFrame(t, connM, mentor.OpTCOpenAnswer, "second opening"); !bytes.Equal(got, []byte{2, mentor.OpenErrInCamp}) {
+		t.Fatalf("second-opening 0xB2EC = % X", got)
+	}
+
 	// ---- silent invite refusals leave the pending table empty ----
 	// Self-invite (the client refuses it before composing - the
 	// sub_702c90 target != data_cedb54 check; a forged one refuses
@@ -609,7 +670,10 @@ func TestMentorInviteConsentEndToEndOverWire(t *testing.T) {
 	// ---- accept: {01 01} commits through the ATOMIC AdmitStudent door ----
 	connM2 := campDialWS(t, first.srv)
 	campHelloWS(t, connM2)
-	campEnterWorld(t, connM2, campE2ENameM)
+	oneRoster := []campE2EMember{{gid: gidM, name: campE2ENameM, kind: mentor.MemberKindMaster, level: 60}}
+	if got, want := campEnterWorldWithSeed(t, connM2, campE2ENameM), campSeedOracle(gidM, oneRoster); !bytes.Equal(got, want) {
+		t.Fatalf("the master's re-entry seed = % X, want % X", got, want)
+	}
 	campSendFrame(t, connM2, mentor.OpTCInviteRequest, campU32(gidS))
 	campExpectFrame(t, connS2, mentor.OpInvitationProposal, "S's fourth prompt")
 	campSendFrame(t, connS2, mentor.OpInvitationProposal, []byte{0x01, 0x01})
@@ -620,10 +684,9 @@ func TestMentorInviteConsentEndToEndOverWire(t *testing.T) {
 	if got, want := campExpectFrame(t, connS2, mentor.OpTCStatus, "the joiner's seed"), campSeedOracle(gidS, twoRoster); !bytes.Equal(got, want) {
 		t.Fatalf("joiner's 0x3AC5 seed = % X, want % X", got, want)
 	}
-	// The commit CREATED the camp, so the master's campless client gets
-	// its OWN seed (not a join row).
-	if got, want := campExpectFrame(t, connM2, mentor.OpTCStatus, "the master's creation seed"), campSeedOracle(gidM, twoRoster); !bytes.Equal(got, want) {
-		t.Fatalf("master's 0x3AC5 seed = % X, want % X", got, want)
+	// The master's client already holds the opened camp: a join row.
+	if got, want := campExpectFrame(t, connM2, mentor.OpTCStatus, "the master's join row"), campJoinOracle(twoRoster[1]); !bytes.Equal(got, want) {
+		t.Fatalf("master's 0x3AC5 join row = % X, want % X", got, want)
 	}
 	campID, joined := first.authority.TrainingCamps().CampOfCharacter(campE2EDivision, stud.ID)
 	if !joined || campID != master.ID {
@@ -779,6 +842,7 @@ func TestMentorInvitePartyGuildOneProposalPerPlayerEndToEnd(t *testing.T) {
 	campEnterWorld(t, connH, campE2ENameH)
 	campSendFrame(t, connH, guild.OpGuildCreateRequest, campGuildCreatePayload("OakWard"))
 	campExpectFrame(t, connH, guild.OpGuildCreateAck, "create ack")
+	campOpenCamp(t, connH, server.authority, host, 60)
 
 	connI := campDialWS(t, server.srv)
 	campHelloWS(t, connI)

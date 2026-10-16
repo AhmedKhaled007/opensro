@@ -121,6 +121,9 @@ export interface NpcTalkInput {
 	readonly prompt?: string;
 	readonly canRecall?: boolean;
 	readonly canStorage?: boolean;
+	// canAcademyOpen is 5D9100's row 0x2D under capability 4: a campless
+	// player of level 60 or more may open an Academy.
+	readonly canAcademyOpen?: boolean;
 	// canMagicOption is the smith's row 0x2F (capability 0x80000000).
 	readonly canMagicOption?: boolean;
 	// canGacha is row 0x27 (5D9737, mask 0x10000): the Magic Pang machine's game row.
@@ -194,6 +197,11 @@ export function npcTalkLayout( input: NpcTalkInput ) {
 						[]),
 					...(input.canStorage ?
 						[ { id: "storage-open", label: copy( "UIIT_STT_UNITY_SERVER_USE_STORAGEROOM" ) } ] :
+						[]),
+					// 5D9100 appends 0x2D right after the storage row (both under
+					// capability 4).
+					...(input.canAcademyOpen ?
+						[ { id: "npc-academy-open", label: copy( "UIIT_STT_TC_OPEN" ) } ] :
 						[]),
 					// 5D9100 lists row 0x2F after the storage rows.
 					...(input.canMagicOption ?

@@ -1,3 +1,14 @@
+/*
+===========================================================================
+
+trainingcamps.go - the training-camp door: opening, admission and notice
+
+The authority store's camp aggregate. OpenCamp is the only command that
+creates a camp (the NPC's 0x72EC); AdmitStudent appends to one, and
+UpdateNotice edits its text. Each checks and commits under the store lock.
+
+===========================================================================
+*/
 package store
 
 // The training-camp plane's door (domain.TrainingCampStore over the
@@ -88,32 +99,14 @@ func (door storeCampDoor) AdmitStudent(
 	}
 
 	campID, masterJoined := door.campOfCharacterLocked(divisionID, master.ID)
-	created := admission.ExpectedCampID == 0
-	var camp domain.TrainingCampRecord
-	var members []domain.TrainingCampMemberRecord
-	if created {
-		if masterJoined {
-			return refused, false
-		}
-		campID = master.ID
-		if _, exists := s.camps[divisionID][campID]; exists {
-			return refused, false
-		}
-		camp = domain.TrainingCampRecord{ID: campID, MasterCharID: master.ID}
-		members = []domain.TrainingCampMemberRecord{
-			{CharID: master.ID, Kind: 0},
-		}
-	} else {
-		if !masterJoined || campID != admission.ExpectedCampID {
-			return refused, false
-		}
-		var exists bool
-		camp, exists = s.camps[divisionID][campID]
-		if !exists || camp.MasterCharID != master.ID {
-			return refused, false
-		}
-		members = s.campMembers[divisionID][campID]
+	if !masterJoined || admission.ExpectedCampID < 1 || campID != admission.ExpectedCampID {
+		return refused, false
 	}
+	camp, exists := s.camps[divisionID][campID]
+	if !exists || camp.MasterCharID != master.ID {
+		return refused, false
+	}
+	members := s.campMembers[divisionID][campID]
 
 	studentCount := 0
 	for _, member := range members {
@@ -128,13 +121,6 @@ func (door storeCampDoor) AdmitStudent(
 	next := make([]domain.TrainingCampMemberRecord, len(members), len(members)+1)
 	copy(next, members)
 	next = append(next, domain.TrainingCampMemberRecord{CharID: student.ID, Kind: 2})
-	if s.camps[divisionID] == nil {
-		s.camps[divisionID] = map[int64]domain.TrainingCampRecord{}
-	}
-	if s.campMembers[divisionID] == nil {
-		s.campMembers[divisionID] = map[int64][]domain.TrainingCampMemberRecord{}
-	}
-	s.camps[divisionID][campID] = camp
 	s.campMembers[divisionID][campID] = next
 	s.changes.camps[campKey{division: divisionID, campID: campID}] = true
 	s.commitLocked(fmt.Sprintf("training-camp-admit-student %s/%d", divisionID, campID))
@@ -144,8 +130,75 @@ func (door storeCampDoor) AdmitStudent(
 	return domain.TrainingCampAdmissionResult{
 		Camp:    camp,
 		Members: resultMembers,
-		Created: created,
 	}, true
+}
+
+/*
+================
+OpenCamp
+
+The NPC's camp opening (v1.150 0x72EC; v1.188 4E4680 checks, then 5DFCC0
+burns the fee through 4E4650 and answers). 4E4680's order: alive (0x6807),
+level (0x6809), gold (0x680A), already in a camp (0x6812). Its first test
+(0x6808, a state flag on the requester) has no v1.150 counterpart: the
+category-0x1D table names no code 8, so it is left out.
+
+The camp id is the master's character id (TrainingCampRecord.ID), so an
+existing row under that id - a camp the master left as a sub-mentor - still
+refuses as in a camp. v1.188's seven-day reopen wait (0x681C) reads the
+disband time a disband writes; the port has no disband yet, so no such
+time exists to read.
+================
+*/
+func (door storeCampDoor) OpenCamp(divisionID string, opening domain.TrainingCampOpening) (domain.TrainingCampOpenResult, domain.TrainingCampOpenRefusal) {
+	var refused domain.TrainingCampOpenResult
+	s := door.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if opening.MasterCharID < 1 || opening.MinLevel < 1 || opening.Fee < 0 {
+		return refused, domain.TrainingCampOpenUnavailable
+	}
+	master := s.characterByIDLocked(divisionID, opening.MasterCharID)
+	if master == nil || master.DeletePending {
+		return refused, domain.TrainingCampOpenUnavailable
+	}
+	if charactervitals.CurrentHP(master) == 0 {
+		return refused, domain.TrainingCampOpenDead
+	}
+	if resolvedCharacterLevel(master) < opening.MinLevel {
+		return refused, domain.TrainingCampOpenLevel
+	}
+	if ledgerGold(master) < opening.Fee {
+		return refused, domain.TrainingCampOpenGold
+	}
+	if _, joined := door.campOfCharacterLocked(divisionID, master.ID); joined {
+		return refused, domain.TrainingCampOpenInCamp
+	}
+	if _, exists := s.camps[divisionID][master.ID]; exists {
+		return refused, domain.TrainingCampOpenInCamp
+	}
+
+	gold := ledgerGold(master) - opening.Fee
+	master.Gold = &gold
+	camp := domain.TrainingCampRecord{ID: master.ID, MasterCharID: master.ID}
+	members := []domain.TrainingCampMemberRecord{{CharID: master.ID, Kind: 0}}
+	if s.camps[divisionID] == nil {
+		s.camps[divisionID] = map[int64]domain.TrainingCampRecord{}
+	}
+	if s.campMembers[divisionID] == nil {
+		s.campMembers[divisionID] = map[int64][]domain.TrainingCampMemberRecord{}
+	}
+	s.camps[divisionID][camp.ID] = camp
+	s.campMembers[divisionID][camp.ID] = members
+	s.changes.camps[campKey{division: divisionID, campID: camp.ID}] = true
+	s.changes.characters[master] = true
+	s.commitLocked(fmt.Sprintf("training-camp-open %s/%d", divisionID, camp.ID))
+	return domain.TrainingCampOpenResult{
+		Camp:    camp,
+		Members: append([]domain.TrainingCampMemberRecord(nil), members...),
+		Gold:    gold,
+	}, domain.TrainingCampOpenAccepted
 }
 
 func resolvedCharacterLevel(character *domain.Character) int64 {

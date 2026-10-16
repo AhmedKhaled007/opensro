@@ -1,3 +1,11 @@
+/*
+===========================================================================
+
+trainingcamps_test.go - the training-camp door: opening, admission,
+notice authority and persistence
+
+===========================================================================
+*/
 package store
 
 import (
@@ -8,6 +16,28 @@ import (
 	"opensro.online/server/internal/domain"
 )
 
+/*
+================
+openTestCamp
+
+The master's camp opened at the NPC with no fee and the lowest level floor,
+so a test reaches admission without staging gold or levels.
+================
+*/
+func openTestCamp(t *testing.T, s *Store, master *domain.Character) domain.TrainingCampRecord {
+	t.Helper()
+	opened, refusal := s.TrainingCamps().OpenCamp(testDivision, domain.TrainingCampOpening{MasterCharID: master.ID, MinLevel: 1})
+	if refusal != domain.TrainingCampOpenAccepted {
+		t.Fatalf("open camp refused: %d", refusal)
+	}
+	return opened.Camp
+}
+
+/*
+================
+TestTrainingCampNoticeAuthorityAndPersistence
+================
+*/
 func TestTrainingCampNoticeAuthorityAndPersistence(t *testing.T) {
 	t.Parallel()
 	dir, clock := t.TempDir(), newTestClock()
@@ -18,7 +48,8 @@ func TestTrainingCampNoticeAuthorityAndPersistence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a, ok := s.TrainingCamps().AdmitStudent(testDivision, domain.TrainingCampAdmission{MasterCharID: master.ID, StudentCharID: student.ID, MasterMinLevel: 1, StudentMaxLevel: 140, StudentLimit: 5})
+	opened := openTestCamp(t, s, master)
+	a, ok := s.TrainingCamps().AdmitStudent(testDivision, domain.TrainingCampAdmission{MasterCharID: master.ID, StudentCharID: student.ID, ExpectedCampID: opened.ID, MasterMinLevel: 1, StudentMaxLevel: 140, StudentLimit: 5})
 	if !ok {
 		t.Fatal("admission failed")
 	}
@@ -61,6 +92,11 @@ func TestTrainingCampNoticeAuthorityAndPersistence(t *testing.T) {
 	}
 }
 
+/*
+================
+TestTrainingCampDeletionInvariant
+================
+*/
 func TestTrainingCampDeletionInvariant(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -75,9 +111,11 @@ func TestTrainingCampDeletionInvariant(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	opened := openTestCamp(t, s, master)
 	admission, ok := s.TrainingCamps().AdmitStudent(testDivision, domain.TrainingCampAdmission{
 		MasterCharID:    master.ID,
 		StudentCharID:   student.ID,
+		ExpectedCampID:  opened.ID,
 		MasterMinLevel:  1,
 		StudentMaxLevel: 140,
 		StudentLimit:    5,
@@ -142,6 +180,11 @@ func TestTrainingCampDeletionInvariant(t *testing.T) {
 	}
 }
 
+/*
+================
+TestTrainingCampAdmissionRefusesInvalidAggregateCommands
+================
+*/
 func TestTrainingCampAdmissionRefusesInvalidAggregateCommands(t *testing.T) {
 	t.Parallel()
 	s := openTest(t, t.TempDir(), newTestClock())
@@ -163,6 +206,9 @@ func TestTrainingCampAdmissionRefusesInvalidAggregateCommands(t *testing.T) {
 		{"invalid student ceiling", domain.TrainingCampAdmission{MasterCharID: master.ID, StudentCharID: student.ID, MasterMinLevel: 1, StudentMaxLevel: 0, StudentLimit: 5}},
 		{"invalid student limit", domain.TrainingCampAdmission{MasterCharID: master.ID, StudentCharID: student.ID, MasterMinLevel: 1, StudentMaxLevel: 140, StudentLimit: 8}},
 		{"stale existing camp", domain.TrainingCampAdmission{MasterCharID: master.ID, StudentCharID: student.ID, ExpectedCampID: master.ID + 99, MasterMinLevel: 1, StudentMaxLevel: 140, StudentLimit: 5}},
+		// An admission never creates a camp: only OpenCamp does (0x72EC).
+		{"campless master", domain.TrainingCampAdmission{MasterCharID: master.ID, StudentCharID: student.ID, MasterMinLevel: 1, StudentMaxLevel: 140, StudentLimit: 5}},
+		{"campless master naming its own id", domain.TrainingCampAdmission{MasterCharID: master.ID, StudentCharID: student.ID, ExpectedCampID: master.ID, MasterMinLevel: 1, StudentMaxLevel: 140, StudentLimit: 5}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -170,5 +216,89 @@ func TestTrainingCampAdmissionRefusesInvalidAggregateCommands(t *testing.T) {
 				t.Fatal("invalid training-camp admission accepted")
 			}
 		})
+	}
+}
+
+/*
+================
+TestTrainingCampOpenChecksThenBurnsTheFee
+
+4E4680's refusals in its order (dead, level, gold, already in a camp) change
+nothing; an accepted opening burns the fee, installs the camp and its one
+master row, books an academy_fee ledger row, and survives a reopen.
+================
+*/
+func TestTrainingCampOpenChecksThenBurnsTheFee(t *testing.T) {
+	t.Parallel()
+	dir, clock := t.TempDir(), newTestClock()
+	s := openTest(t, dir, clock)
+	master, other := guildTestCharacter("openmaster"), guildTestCharacter("openother")
+	for _, c := range []*domain.Character{master, other} {
+		if err := s.CreateCharacter(testDivision, "test-account", c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const fee, floor = 100000, 60
+	opening := domain.TrainingCampOpening{MasterCharID: master.ID, MinLevel: floor, Fee: fee}
+	set := func(level, gold, hp int64) {
+		s.MutateCharacter(master, "test-open-stage", func() {
+			master.Level, master.Gold = &level, &gold
+			if hp < 0 {
+				master.CurrentHP = nil
+			} else {
+				master.CurrentHP = &hp
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name            string
+		level, gold, hp int64
+		want            domain.TrainingCampOpenRefusal
+	}{
+		// The dead test comes first, ahead of a level and gold that also fail.
+		{"dead", 1, 0, 0, domain.TrainingCampOpenDead},
+		{"level", floor - 1, fee, -1, domain.TrainingCampOpenLevel},
+		{"gold", floor, fee - 1, -1, domain.TrainingCampOpenGold},
+	} {
+		set(tc.level, tc.gold, tc.hp)
+		if _, refusal := s.TrainingCamps().OpenCamp(testDivision, opening); refusal != tc.want {
+			t.Fatalf("%s: refusal %d, want %d", tc.name, refusal, tc.want)
+		}
+		if _, joined := s.TrainingCamps().CampOfCharacter(testDivision, master.ID); joined {
+			t.Fatalf("%s: a refused opening made a camp", tc.name)
+		}
+		if *master.Gold != tc.gold {
+			t.Fatalf("%s: a refused opening moved gold", tc.name)
+		}
+	}
+
+	set(floor, fee+5, -1)
+	opened, refusal := s.TrainingCamps().OpenCamp(testDivision, opening)
+	if refusal != domain.TrainingCampOpenAccepted || opened.Gold != 5 || *master.Gold != 5 {
+		t.Fatalf("open: %+v refusal %d gold %d", opened, refusal, *master.Gold)
+	}
+	if opened.Camp.ID != master.ID || opened.Camp.MasterCharID != master.ID ||
+		!reflect.DeepEqual(opened.Members, []domain.TrainingCampMemberRecord{{CharID: master.ID, Kind: 0}}) {
+		t.Fatalf("opened camp %+v", opened)
+	}
+	rows := ledgerRows(t, s)
+	last := rows[len(rows)-1]
+	if last.charID != master.ID || last.reason != "academy_fee" || last.gold != -fee || last.balance != 5 {
+		t.Fatalf("ledger row %+v", last)
+	}
+
+	set(floor, 10*fee, -1)
+	if _, refusal := s.TrainingCamps().OpenCamp(testDivision, opening); refusal != domain.TrainingCampOpenInCamp {
+		t.Fatalf("second opening: refusal %d", refusal)
+	}
+	if *master.Gold != 10*fee {
+		t.Fatal("a refused second opening moved gold")
+	}
+
+	s.Close()
+	reopened := openTest(t, dir, clock)
+	camp, members, ok := reopened.TrainingCamps().Camp(testDivision, opened.Camp.ID)
+	if !ok || camp != opened.Camp || !reflect.DeepEqual(members, opened.Members) {
+		t.Fatalf("reopened camp %+v %+v %v", camp, members, ok)
 	}
 }

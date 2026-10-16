@@ -2,10 +2,12 @@
 ===========================================================================
 
 job-hud.ts - the job guild dialogs: join and withdraw confirmations and
-the alias window
+the alias window, and the storage NPC's Academy opening question
 
 CIFNpcTalk_OnSimpleMsgBoxResult (5D26F0) sends the join (box type 4,
-field tri_job_type) and the withdrawal (type 5) after their questions;
+field tri_job_type) and the withdrawal (type 5) after their questions, and
+the Academy opening (type 6, 0x72EC) after its fee question: one native
+owner (CIFNpcTalk_ShowJobGuildMsgBox 5D3880) raises all three boxes;
 the job menu's alias rows open CIFJobAlias (CIFJobAlias_OpenForMode
 645E90). A name is checked first (6461C0); the server's "free" answer marks
 it checked (646110), which enables OK; any edit away from the checked name
@@ -26,7 +28,7 @@ JobConfirm
 ================
 */
 interface JobConfirm {
-	readonly kind: "join" | "withdraw";
+	readonly kind: "join" | "withdraw" | "academy-open";
 	readonly npc: number;
 	readonly job: number;
 }
@@ -149,7 +151,8 @@ export function createJobHud() {
 		================
 		ask
 
-		Raises the join or withdrawal question for a guild NPC.
+		Raises the join or withdrawal question for a guild NPC, or the
+		Academy opening question for a storage NPC (job 0).
 		================
 		*/
 		ask( kind: JobConfirm["kind"], npc: number, job: number ) {

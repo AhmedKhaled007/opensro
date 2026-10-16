@@ -409,8 +409,21 @@ func TestMatchJoinHandshakeEndToEndOverWire(t *testing.T) {
 		append(formedRows, chinaRow(gidKate, e2eKateName, 25)), "kate (joiner) seed")
 	expectExactFrame(t, kate2, match.OpPartyJoinAck, []byte{1, 1}, "kate join complete")
 
-	// ---- mentor join: Mira (level 60 master) lists (entry 3), Jack
-	// (level 20, campless) joins ----
+	// ---- mentor join: Mira (level 60) opens her camp at the NPC
+	// (0x72EC), lists it (entry 3), and Jack (level 20, campless) joins ----
+	var miraChar *enterworld.Character
+	for _, c := range first.deps.Characters.CharactersForDivision(e2eDivision) {
+		if c.Name == e2eMiraName {
+			miraChar = c
+		}
+	}
+	fee := int64(mentor.CampOpenFee)
+	first.authority.MutateCharacter(miraChar, "test-open-fee", func() { miraChar.Gold = &fee })
+	sendFrame(t, mira, mentor.OpTCOpenRequest, u32le(0x2710))
+	expectExactFrame(t, mira, mentor.OpTCOpenAnswer,
+		mentor.EncodeOpenAckB2EC(gidMira, "", "", []mentor.MemberWireRow{campRow(gidMira, e2eMiraName, mentor.MemberKindMaster, 60)}),
+		"mira's 0xB2EC camp")
+	expectExactFrame(t, mira, 0x30B3, []byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0}, "mira's gold after the fee")
 	sendFrame(t, mira, match.OpMentorRegisterRequest, mentorRequest(0, 0, 2, "mira academy"))
 	expectExactFrame(t, mira, match.OpMentorRegisterAck,
 		concat([]byte{1}, u32le(3), u32le(0), []byte{2}, wideStr("mira academy"), u32le(0)),
@@ -428,7 +441,7 @@ func TestMatchJoinHandshakeEndToEndOverWire(t *testing.T) {
 		mentor.EncodeCampSeed3AC5(gidJack, "", "", campRows), "jack's 0x3AC5 camp seed")
 	expectExactFrame(t, jack, match.OpMentorJoinAck, []byte{1, 1}, "jack mentor join complete")
 	expectExactFrame(t, mira, mentor.OpTCStatus,
-		mentor.EncodeCampSeed3AC5(gidMira, "", "", campRows), "mira's 0x3AC5 seed (fresh camp)")
+		mentor.EncodeCampJoinRow3AC5(campRows[1]), "mira's 0x3AC5 join row")
 	var jackChar *enterworld.Character
 	for _, c := range first.deps.Characters.CharactersForDivision(e2eDivision) {
 		if c.Name == e2eJackName {

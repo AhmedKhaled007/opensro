@@ -1,3 +1,13 @@
+/*
+===========================================================================
+
+matchjoin.go - a mentor-match join committed into the master's camp
+
+The match board's accepted join admits the student through the same
+store door and 0x3AC5 fan-out as an accepted invitation.
+
+===========================================================================
+*/
 package mentor
 
 // The mentor-match JOIN seam: internal/game/social/match's owner-approval handshake
@@ -34,8 +44,8 @@ import (
 // MatchJoinPrecheck answers a request-time refusal reason ("" = ok) for
 // a proposed mentor-match join, mirroring the 0x76B1 invite gates
 // (handleInvite): the master must be recognizable (level >= 0x3c - the
-// sub_81e9f0 kind-0 gate - and, when camped, the camp's kind-0 master
-// with student headroom), the joiner campless, not delete-pending and
+// sub_81e9f0 kind-0 gate - and the kind-0 master of a camp opened at the
+// NPC, with student headroom), the joiner campless, not delete-pending and
 // inside the student band. Everything re-validates at commit time under
 // the store doors.
 func (r *InviteRuntime) MatchJoinPrecheck(divisionID, masterName, joinerName string) string {
@@ -49,17 +59,19 @@ func (r *InviteRuntime) MatchJoinPrecheck(divisionID, masterName, joinerName str
 	if characterLevel(master) < MasterMinLevel {
 		return "master below the 0x3c band"
 	}
-	if campID, joined := r.deps.TrainingCampAuthority().CampOfCharacter(divisionID, master.ID); joined {
-		camp, members, ok := r.deps.TrainingCampAuthority().Camp(divisionID, campID)
-		if !ok {
-			return "master's camp resolves to no stored row"
-		}
-		if camp.MasterCharID != master.ID {
-			return "listing owner is not their camp's master"
-		}
-		if countCampKind(members, MemberKindStudent) >= CampStudentCap {
-			return "camp sits at the student cap"
-		}
+	campID, joined := r.deps.TrainingCampAuthority().CampOfCharacter(divisionID, master.ID)
+	if !joined {
+		return "master has no camp opened"
+	}
+	camp, members, ok := r.deps.TrainingCampAuthority().Camp(divisionID, campID)
+	if !ok {
+		return "master's camp resolves to no stored row"
+	}
+	if camp.MasterCharID != master.ID {
+		return "listing owner is not their camp's master"
+	}
+	if countCampKind(members, MemberKindStudent) >= CampStudentCap {
+		return "camp sits at the student cap"
 	}
 	joiner := findCampCharacterByName(r.deps, divisionID, joinerName)
 	if joiner == nil {
@@ -78,13 +90,11 @@ func (r *InviteRuntime) MatchJoinPrecheck(divisionID, masterName, joinerName str
 }
 
 // CommitMatchJoin commits one ACCEPTED mentor-match join: the joiner's
-// kind-2 student row installs through the atomic admission door (which
-// creates the master's camp when the expected camp id is zero), then the
-// 0x3AC5 fan-out runs exactly like the invite
-// consent's: the joiner gets their status-10 sub-1 seed on
-// joinerSession, every sitting online member the status-2 join row, and
-// a freshly created camp's master their own seed. Returns the refusal
-// reason ("" = committed).
+// kind-2 student row installs through the atomic admission door into the
+// master's opened camp, then the 0x3AC5 fan-out runs exactly like the
+// invite consent's: the joiner gets their status-10 sub-1 seed on
+// joinerSession and every sitting online member the status-2 join row.
+// Returns the refusal reason ("" = committed).
 func (r *InviteRuntime) CommitMatchJoin(joinerSession *transport.Session, divisionID, masterName, joinerName string) string {
 	if refusal := r.MatchJoinPrecheck(divisionID, masterName, joinerName); refusal != "" {
 		return refusal
@@ -100,7 +110,7 @@ func (r *InviteRuntime) CommitMatchJoin(joinerSession *transport.Session, divisi
 	joinerRow := enterworld.TrainingCampMemberRecord{CharID: joiner.ID, Kind: MemberKindStudent}
 	campID, joined := r.deps.TrainingCampAuthority().CampOfCharacter(divisionID, master.ID)
 	if !joined {
-		campID = 0
+		return "master has no camp opened"
 	}
 	admission, ok := r.deps.TrainingCampAuthority().AdmitStudent(
 		divisionID,
@@ -118,7 +128,6 @@ func (r *InviteRuntime) CommitMatchJoin(joinerSession *transport.Session, divisi
 	}
 	campID = admission.Camp.ID
 	campMembers := admission.Members
-	created := admission.Created
 	rows := r.campWireRows(divisionID, campMembers)
 	joinerWireRow := r.memberWireRow(divisionID, joinerRow)
 	_ = joinerSession.Send(OpTCStatus, EncodeCampSeed3AC5(joinerWireRow.MemberID, admission.Camp.Subject, admission.Camp.Contents, rows))
@@ -135,12 +144,8 @@ func (r *InviteRuntime) CommitMatchJoin(joinerSession *transport.Session, divisi
 		if !live {
 			continue
 		}
-		if created && member.CharID == master.ID {
-			_ = peer.Send(OpTCStatus, EncodeCampSeed3AC5(enterworld.ObjectIDForCharacter(character), admission.Camp.Subject, admission.Camp.Contents, rows))
-			continue
-		}
 		_ = peer.Send(OpTCStatus, joinPush)
 	}
-	log.Debugf("mentor: %s joined %s's academy through the match board (camp %d, %d member(s), created=%v)", joiner.Name, master.Name, campID, len(campMembers), created)
+	log.Debugf("mentor: %s joined %s's academy through the match board (camp %d, %d member(s))", joiner.Name, master.Name, campID, len(campMembers))
 	return ""
 }
