@@ -1550,6 +1550,12 @@ state here before a command can claim a native wire conversation.
 		): WireFrame | null {
 			dirty = true;
 			soundClock = now;
+			if ( command.kind === "local-notice" ) {
+				// A refusal the UI found before sending (guild-names.ts) joins the
+				// notices the server's refusals use, so both show alike.
+				notices = [ ...notices.slice( -99 ), { ...command.notice, sequence: ++noticeSequence } ];
+				return null;
+			}
 			if ( command.kind === "berserk" ) {
 				return localGid && feedback.gauge() === 5 ?
 					sendFrame( { opcode: 0x7341, payload: Uint8Array.of( 1 ) } ) :

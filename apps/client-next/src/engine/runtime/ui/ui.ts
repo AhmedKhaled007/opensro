@@ -208,6 +208,12 @@ import { createReverseReturnHud } from "./hud/reverse-return-hud";
 import { createSpecialtyDealHud } from "./hud/specialty-deal-hud";
 import { socialQuestion } from "@/engine/foundation/ui/social-question";
 import {
+	guildCreateNameCheck,
+	guildCreateSendRefusal,
+	guildGrantNameCheck,
+	guildWarNameRefusal
+} from "@/engine/foundation/gameplay/guild-names";
+import {
 	cargoBuyTotal,
 	COS_TRADE_SELL_ALL,
 	COS_TRADE_STAR_FIRST,
@@ -261,7 +267,7 @@ import {
 import { alchemyEffectCell, alchemyEffectTexture, alchemyResultLines } from "@/engine/foundation/ui/alchemy-result";
 import { createUnionHud } from "./hud/union-hud";
 import { createGuildWarHud } from "./hud/guild-war-hud";
-import { guildWarRequest, warScoreLimits, WAR_MAX_STAKE, WAR_UNLIMITED } from "@/engine/foundation/gameplay/guild-war";
+import { guildWarRequest, warScoreLimits, WAR_UNLIMITED } from "@/engine/foundation/gameplay/guild-war";
 import { guildSelf } from "@/engine/foundation/gameplay/social-roster";
 import { targetPlayer } from "@/engine/foundation/gameplay/target-player";
 import { createExchangeHud } from "./hud/exchange-hud";
@@ -1351,6 +1357,8 @@ export function createUi(
 		socialPage = 0,
 		confirmSocial = "",
 		partyOptions = 4;
+	// The nickname box 0x17 asks about (5E35E0): the member and the nickname.
+	let grantAsk: { readonly id: number; readonly member: string; readonly name: string; } | null = null;
 	let goldAmount = "", confirmDrop = "", goldDialog: false | "drop" | "deposit" | "withdraw" = false;
 	let groundDrop: { slot: number; refObjId: number; } | null = null;
 	let splitStack: { slot: number; refObjId: number; quantity: number; } | null = null, splitAmount = "1";
@@ -3484,10 +3492,15 @@ export function createUi(
 				sendGameplay( { kind: confirmSocial, name: member.name } );
 			} else if ( confirmSocial === "guild-leave" || confirmSocial === "guild-dissolve" ) {
 				sendGameplay( { kind: confirmSocial, gid } );
+			} else if ( confirmSocial === "guild-title" && grantAsk ) {
+				// 6971B0 case 0x14 sends 0x72BC with the asked member and nickname.
+				sendGameplay( { kind: "guild-title", id: grantAsk.id, name: grantAsk.name } );
 			}
 			confirmSocial = "";
+			grantAsk = null;
 		} else if ( id === "social-confirm-no" ) {
 			confirmSocial = "";
+			grantAsk = null;
 		} else if ( id === "guild-create" ) {
 			sendGameplay( { kind: id, gid: view.gameplay?.target ?? 0, name: socialName } );
 		} else if ( id === "guild-invite" ) {
@@ -3602,6 +3615,20 @@ export function createUi(
 				);
 			} else {
 				if ( id === "war-confirm" && state.mode === "input" && social ) {
+					// 619620 mode 1 refuses in the chat and the centre and keeps the
+					// window open.
+					const rules = hud.data()?.guildNameRules;
+					if ( !rules ) return;
+					const refusal = guildWarNameRefusal(
+						state.terms.name,
+						social.guild?.name ?? "",
+						state.terms.stake,
+						rules
+					);
+					if ( refusal ) {
+						sendGameplay( { kind: "local-notice", notice: refusal } );
+						return;
+					}
 					try {
 						guildWarRequest( social, { kind: "guild-war-declare", terms: state.terms } );
 					} catch {
@@ -3636,8 +3663,20 @@ export function createUi(
 		} else if ( id === "guild-notice" ) {
 			sendGameplay( { kind: id, subject: socialSubject, contents: socialContents } );
 		} else if ( id === "guild-donate" ) sendGameplay( { kind: id, amount: Number( socialAmount ) } );
-		else if ( id === "guild-title" ) sendGameplay( { kind: id, id: socialMember, name: socialName } );
-		else if ( id === "guild-role" ) sendGameplay( { kind: id, id: socialMember, role: Number( socialAmount ) } );
+		else if ( id === "guild-title" ) {
+			// 5E35E0: the nickname under the guild-name filter, then box 0x17's
+			// question; the input box closes unless the name is too long.
+			const rules = hud.data()?.guildNameRules;
+			const member = view.gameplay?.social?.guild?.members.find( m => m.id === socialMember );
+			if ( !rules || !member ) return;
+			const check = guildGrantNameCheck( socialName, rules );
+			if ( check.notice ) sendGameplay( { kind: "local-notice", notice: check.notice } );
+			if ( !check.keepOpen ) guildDialog = "";
+			if ( check.ask ) {
+				grantAsk = { id: member.id, member: member.name, name: socialName };
+				confirmSocial = "guild-title";
+			}
+		} else if ( id === "guild-role" ) sendGameplay( { kind: id, id: socialMember, role: Number( socialAmount ) } );
 		// In retail, CIFWorldMap 57F43D swallows map button messages while AUTO MOVE is on.
 		// By design, client-next allows clicking into a city even in Automatic Movement State,
 		// and automatically switches to Manual Movement State (mapFollow = false).
@@ -5266,16 +5305,33 @@ export function createUi(
 							sendGameplay( { kind: "guild-dissolve", gid: asked.npc } );
 						} else if ( asked.kind === "secede" ) sendGameplay( { kind: "guild-leave", gid: asked.npc } );
 						else if ( asked.kind === "release" ) sendGameplay( { kind: "guild-release", gid: asked.npc } );
-						else {
+						else if ( asked.kind === "create-name" ) {
+							// 6971B0 case 0xE: box 0x11's Yes raises box 0x12, the cost.
+							guildManagerHud.ask( "create-cost", asked.npc, 0, asked.text );
+						} else if ( asked.kind === "create-cost" ) {
+							// Case 0xF: 700590 checks the character-name column, then 0x7663.
+							const rules = hud.data()?.nameRules;
+							const refusal = rules ? guildCreateSendRefusal( asked.text ?? "", rules ) : null;
+							if ( refusal ) sendGameplay( { kind: "local-notice", notice: refusal } );
+							else if ( rules ) {
+								sendGameplay( { kind: "guild-create", gid: asked.npc, name: asked.text ?? "" } );
+							}
+						} else {
 							sendGameplay( { kind: "guild-compensation-claim", gid: asked.npc } );
 							sendGameplay( { kind: "compensation-dismiss" } );
 						}
 						return;
 					}
 					const entry = guildManagerHud.field();
-					if ( entry?.text && entry.kind === "create" ) {
-						guildManagerHud.takeField();
-						sendGameplay( { kind: "guild-create", gid: entry.npc, name: entry.text } );
+					if ( entry?.kind === "create" ) {
+						// 5D3D10: the name under the guild-name filter, then box 0x11's
+						// question; the box stays open only for a bad length.
+						const rules = hud.data()?.guildNameRules;
+						if ( !rules ) return;
+						const check = guildCreateNameCheck( entry.text, rules );
+						if ( check.notice ) sendGameplay( { kind: "local-notice", notice: check.notice } );
+						if ( !check.keepOpen ) guildManagerHud.takeField();
+						if ( check.ask ) guildManagerHud.ask( "create-name", entry.npc, 0, entry.text );
 					} else if ( entry?.member ) {
 						// 5F1D60 opens 5D3EB0's named confirmation before sending.
 						const guild = view.gameplay?.social?.guild;
@@ -20245,11 +20301,9 @@ export function createUi(
 						y,
 						warInvite ? "invite-accept" : "war-confirm",
 						hudCopy( at( 5 ).text ),
-						warInvite ?
-							Number( game?.progression?.gold ?? 0 ) < terms.stake :
-							input &&
-							(terms.period === 0 || terms.name.length < 2 || terms.name === game?.social?.guild?.name ||
-								terms.stake > WAR_MAX_STAKE)
+						// 619620 refuses a bad name or stake with its own notices
+						// (guildWarNameRefusal), so only an empty period disables OK.
+						warInvite ? Number( game?.progression?.gold ?? 0 ) < terms.stake : input && terms.period === 0
 					);
 					authoredLabeledButton(
 						at( 6 ),
@@ -20347,7 +20401,7 @@ export function createUi(
 					no: "union-ask-no"
 				} );
 			}
-			const socialAsk = socialQuestion( confirmSocial, game?.social?.guild, socialMember );
+			const socialAsk = socialQuestion( confirmSocial, game?.social?.guild, socialMember, grantAsk );
 			if ( worldVisible && socialAsk ) {
 				// The guild window's Withdraw (UIIT_STT_GUILD_EXPULSION, a ban of
 				// the selected member), Secede and Disband, and the party ban,
@@ -20356,7 +20410,10 @@ export function createUi(
 				blocks = [ full ];
 				simpleMessageBox( {
 					title: hudCopy( socialAsk.title ),
-					lines: socialAsk.lines.map( line => hudCopy( line.key ).replace( "%s", () => line.arg ?? "" ) ),
+					lines: socialAsk.lines.map( line => {
+						let index = 0;
+						return hudCopy( line.key ).replace( /%s/g, () => line.args?.[index++] ?? "" );
+					} ),
 					yes: "social-confirm-yes",
 					no: "social-confirm-no"
 				} );
@@ -21024,6 +21081,12 @@ export function createUi(
 							hudCopy( "UIIT_CTL_GUILDWAR_COMPENSATION_02" )
 						],
 						"master-leave": [ "[" + (guildField?.text ?? "") + "]", hudCopy( "UIIT_MSG_MLEAVE_CONFIRM" ) ],
+						// 52F460 cases 0x10 and 0x11 (box types 0x11 and 0x12).
+						"create-name": [ say( "UIIT_MSG_GUILD_QUESTION_NAME_CONFIRM", guildAsk?.text ?? "" ), "" ],
+						"create-cost": [
+							say( "UIIT_MSG_GUILD_QUESTION_CREATE", guildAsk?.text ?? "" ),
+							hudCopy( "UIIT_MSG_GUILD_QUESTION_CREATE_CONFIRM" )
+						],
 						"create": [ "", "" ],
 						"vote": [
 							Math.ceil( (guildVote?.remainingMs ?? 0) / 60000 ) + " " + hudCopy( "PARAM_MINUTE" ),

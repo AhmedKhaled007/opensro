@@ -198,6 +198,11 @@ operations carry identities and choices, never client-calculated rewards.
 */
 export type GameplayCommand =
 	| { readonly kind: "berserk"; }
+	// A native refusal the UI raised itself (a typed guild name), shown as a notice.
+	| {
+		readonly kind: "local-notice";
+		readonly notice: import("@/engine/foundation/gameplay/system-notices").SystemNotice;
+	}
 	| { readonly kind: "recall-appoint"; readonly gid: number; }
 	| { readonly kind: "return-cancel"; }
 	| { readonly kind: "gathering-cancel"; }

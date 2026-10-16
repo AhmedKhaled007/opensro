@@ -2155,6 +2155,10 @@ test("GPU management controls send typed intent and preserve the selected guild 
 		output = f.ui.step( f.state, 500 );
 		assert.equal( output.controls.find( c => c.id === "guild-title" ).disabled, false );
 		f.ui.event( { kind: "activate", id: "guild-title" } );
+		// 5E35E0 asks box 0x17's question before 0x72BC.
+		output = f.ui.step( f.state, 550 );
+		assert.ok( output.controls.some( c => c.id === "social-confirm-yes" ) );
+		f.ui.event( { kind: "activate", id: "social-confirm-yes" } );
 		assert.deepEqual( sent.pop(), { kind: "guild-title", id: 22, name: "Officer" } );
 	} finally {
 		f.dispose();
