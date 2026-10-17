@@ -116,6 +116,8 @@ func HandleGmCommand(deps Dependencies, presence PresenceView, divisionID string
 			}
 		}
 		return Outcome{Ack: EncodeRequestFailure(request), Refusal: "monster-kill-refused"}
+	case SubInitQ, SubResetQ, SubCompQ, SubRemoveQ:
+		return handleQuestTool(divisionID, sender, request, status)
 	case SubInvisible, SubInvincible:
 		if len(payload) != 1 || len(status) == 0 || status[0] == nil {
 			return Outcome{Ack: EncodeRequestFailure(request), Refusal: "body-status-unavailable"}
@@ -215,6 +217,51 @@ func handlePlayerTeleport(divisionID string, sender *enterworld.Character, reque
 		moved = owner.RecallUserGM(divisionID, sender.Name, request.Name)
 	}
 	if !moved {
+		return refusal
+	}
+	return Outcome{Ack: []byte{AckResultOK, request.Subcmd}}
+}
+
+// QuestTools is the action-owned port for the GM's quest commands
+// (action/gmquest.go): each acts on the GM's own journal.
+type QuestTools interface {
+	InitQuestGM(division, name, codename string) bool
+	RemoveQuestGM(division, name, codename string) bool
+	CompleteQuestGM(division, name, codename string) bool
+	ResetQuestsGM(division, name string) bool
+}
+
+// handleQuestTool honors /INITQ, /RESETQ, /COMPQ and /REMOVEQ (subs 0x1B,
+// 0x1C, 0x1D, 0x1E). 751EC0 selects case 5 (no tail) for result 1 and the
+// generic system message for result 2, like every other relayed command. An
+// empty codename is a refusal; the owner refuses an unknown or inactive quest.
+func handleQuestTool(divisionID string, sender *enterworld.Character, request Request, status []BodyStatusCommands) Outcome {
+	refusal := Outcome{Ack: EncodeRequestFailure(request), Refusal: fmt.Sprintf("gmcommand: quest tool 0x%02X refused", request.Subcmd)}
+	if len(status) == 0 {
+		return refusal
+	}
+	owner, ok := status[0].(QuestTools)
+	if !ok {
+		return refusal
+	}
+	var done bool
+	switch request.Subcmd {
+	case SubResetQ:
+		done = owner.ResetQuestsGM(divisionID, sender.Name)
+	default:
+		if !request.HasName || request.Name == "" {
+			return refusal
+		}
+		switch request.Subcmd {
+		case SubInitQ:
+			done = owner.InitQuestGM(divisionID, sender.Name, request.Name)
+		case SubCompQ:
+			done = owner.CompleteQuestGM(divisionID, sender.Name, request.Name)
+		case SubRemoveQ:
+			done = owner.RemoveQuestGM(divisionID, sender.Name, request.Name)
+		}
+	}
+	if !done {
 		return refusal
 	}
 	return Outcome{Ack: []byte{AckResultOK, request.Subcmd}}

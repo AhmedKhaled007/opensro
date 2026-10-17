@@ -161,6 +161,10 @@ type Runtime struct {
 	NpcDialogs *NpcDialogStore
 	NpcQuests  NpcQuestHooks
 
+	// GMQuests are the quest runtime's GM tools (gmquest.go), injected by the
+	// composition root like NpcQuests.
+	GMQuests GMQuestHooks
+
 	// bodyRestores holds the timed body-mode restores (spawnprotection.go).
 	bodyRestores *BodyRestoreQueue
 

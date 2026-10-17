@@ -30,6 +30,10 @@ const GM_SPEED_MIN_PERCENT = 10;
 const GM_SPEED_MAX_PERCENT = 1000;
 const GM_ZOE = 0x0c;
 const GM_MOB_KILL = 0x14;
+const GM_INIT_Q = 0x1b;
+const GM_RESET_Q = 0x1c;
+const GM_COMP_Q = 0x1d;
+const GM_REMOVE_Q = 0x1e;
 const MAX_OBJECT_ID = 0xffffffff;
 const GM_COUNT_MASK = 0xff;
 
@@ -180,6 +184,27 @@ export function gmReply( p: Uint8Array ): GmReply | null {
 
 /*
 ================
+sizedNameFrame
+
+One subcommand byte, then the u16 length and bytes of the typed name
+(4FD5B0). An empty, oversized or NUL-bearing name is a malformed line, not a
+frame.
+================
+*/
+function sizedNameFrame( subcommand: number, text: string ): WireFrame {
+	const bytes = new TextEncoder().encode( text );
+	if ( !bytes.length || bytes.length >= MAX_GM_NAME_BYTES || text.includes( "\0" ) ) {
+		throw Error( "Invalid GM name" );
+	}
+	const payload = new Uint8Array( 3 + bytes.length );
+	payload[0] = subcommand;
+	new DataView( payload.buffer ).setUint16( 1, bytes.length, true );
+	payload.set( bytes, 3 );
+	return { opcode: OP_GM_COMMAND, payload };
+}
+
+/*
+================
 gmRequest
 
 The verified name and scalar arms of 509CF0. monster resolves a typed
@@ -289,6 +314,15 @@ export function gmRequest(
 		view.setUint32( 3 + bytes.length, amount, true );
 		return { opcode: OP_GM_COMMAND, payload };
 	}
+	// 50CA69..50CBE6 /INITQ, /COMPQ, /REMOVEQ name: the discriminator byte,
+	// then 4FD5B0's u16 length and ANSI codename. /RESETQ is the lone token.
+	const questTool = ({ "/INITQ": GM_INIT_Q, "/COMPQ": GM_COMP_Q, "/REMOVEQ": GM_REMOVE_Q } as Record<string, number>)[
+		name?.toUpperCase() ?? ""
+	];
+	if ( questTool !== undefined ) return tokens.length === 2 ? sizedNameFrame( questTool, arg ) : null;
+	if ( name?.toUpperCase() === "/RESETQ" ) {
+		return tokens.length === 1 ? { opcode: OP_GM_COMMAND, payload: Uint8Array.of( GM_RESET_Q ) } : null;
+	}
 	const named = ({
 		"/FINDUSER": 1,
 		"/TOTOWN": 3,
@@ -299,18 +333,7 @@ export function gmRequest(
 		"/LIENAME": 25,
 		"/REALNAME": 26
 	} as Record<string, number>)[name ?? ""];
-	if ( named !== undefined ) {
-		if ( tokens.length !== 2 ) return null;
-		const bytes = new TextEncoder().encode( arg );
-		if ( !bytes.length || bytes.length >= MAX_GM_NAME_BYTES || arg.includes( "\0" ) ) {
-			throw Error( "Invalid GM name" );
-		}
-		const payload = new Uint8Array( 3 + bytes.length );
-		payload[0] = named;
-		new DataView( payload.buffer ).setUint16( 1, bytes.length, true );
-		payload.set( bytes, 3 );
-		return { opcode: OP_GM_COMMAND, payload };
-	}
+	if ( named !== undefined ) return tokens.length === 2 ? sizedNameFrame( named, arg ) : null;
 	const simple = ({ "/GOTOWN": 2, "/WORLDSTATUS": 4, "/INVISIBLE": 14, "/INVINCIBLE": 15 } as Record<
 		string,
 		number

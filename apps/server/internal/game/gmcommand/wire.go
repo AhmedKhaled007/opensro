@@ -84,6 +84,12 @@ const (
 	SubLieName uint8 = 0x19
 	// SubRealName: /REALNAME (@0x0050bbd1 var_4bc = 0x1a) - subcmd + ANSI name.
 	SubRealName uint8 = 0x1A
+	// The quest tools (509CF0 50CA69..50CBE6): the discriminator byte, then
+	// for all but /RESETQ a sized ANSI quest codename (4C4350 then 4FD5B0).
+	SubInitQ   uint8 = 0x1B
+	SubResetQ  uint8 = 0x1C
+	SubCompQ   uint8 = 0x1D
+	SubRemoveQ uint8 = 0x1E
 	// SubGrantSilk is the port's /SILK name amount (operator tooling, not
 	// native): subcmd, u16 len + ANSI name, u32 amount. The native table
 	// ends at 0x30, so 0xF0 cannot collide with a retail command.
@@ -145,6 +151,9 @@ var nameSubcommands = map[uint8]bool{
 	SubRecallGuild: true,
 	SubLieName:     true,
 	SubRealName:    true,
+	SubInitQ:       true,
+	SubCompQ:       true,
+	SubRemoveQ:     true,
 	// SubGrantSilk's name is followed by the u32 amount.
 	SubGrantSilk: true,
 }
@@ -239,6 +248,12 @@ func DecodeGmCommand(payload []byte) (Request, error) {
 		request.Amount, err = reader.U8()
 		return request, err
 	}
+	if subcmd == SubResetQ {
+		if len(payload) != 1 {
+			return Request{}, fmt.Errorf("gmcommand: RESETQ requires one byte")
+		}
+		return request, nil
+	}
 	if !nameSubcommands[subcmd] {
 		return request, nil
 	}
@@ -255,6 +270,9 @@ func DecodeGmCommand(payload []byte) (Request, error) {
 	}
 	request.Name = string(nameBytes)
 	request.HasName = true
+	if (subcmd == SubInitQ || subcmd == SubCompQ || subcmd == SubRemoveQ) && len(payload) != 3+int(nameLen) {
+		return Request{}, fmt.Errorf("gmcommand: trailing quest-tool bytes")
+	}
 	if subcmd == SubGrantSilk {
 		if request.Silk, err = reader.U32(); err != nil {
 			return Request{}, err

@@ -792,6 +792,7 @@ func (game *gameplayPlane) register(hub *transport.Hub, loadQuests questDefiniti
 			return result.Frames, err
 		},
 	}
+	game.items.GMQuests = gmQuestHooks(quests)
 	game.items.UpdateExperience = stats.ExperienceUpdater()
 	game.items.RefundExperience = stats.ExperienceRefundUpdater()
 	game.items.RecallStatPoints = stats.StatRecallUpdater()

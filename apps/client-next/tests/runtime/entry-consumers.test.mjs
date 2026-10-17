@@ -206,6 +206,26 @@ test("LOADMONSTER sends the native subcmd 6 frame with clamped count and resolve
 	assert.equal( gmRequest( "/LOADMONSTER MOB_CH_MANGNYANG", new Map(), 0, { monster } ), null );
 });
 
+test("the quest tools compose the native subcmd 27..30 frames", () => {
+	const frame = line => [ ...gmRequest( line )?.payload ?? [] ];
+	const ascii = text => [ ...new TextEncoder().encode( text ) ];
+	// 50CA69..50CBE6: discriminator, then 4FD5B0's u16 length and the name.
+	assert.deepEqual( frame( "/INITQ QNO_CH_CHEF_1" ), [ 27, 13, 0, ...ascii( "QNO_CH_CHEF_1" ) ] );
+	assert.deepEqual( frame( "/COMPQ QNO_CH_CHEF_1" ), [ 29, 13, 0, ...ascii( "QNO_CH_CHEF_1" ) ] );
+	assert.deepEqual( frame( "/REMOVEQ QNO_CH_CHEF_1" ), [ 30, 13, 0, ...ascii( "QNO_CH_CHEF_1" ) ] );
+	assert.deepEqual( frame( "/RESETQ" ), [ 28 ] );
+	// The client matches the words without case (__wcsicmp), like the other new arms.
+	assert.deepEqual( frame( "/initq QNO_CH_CHEF_1" ), [ 27, 13, 0, ...ascii( "QNO_CH_CHEF_1" ) ] );
+	assert.deepEqual( frame( "/resetq" ), [ 28 ] );
+	// The token counts are the parser's: a name for three, none for /RESETQ.
+	assert.equal( gmRequest( "/INITQ" ), null );
+	assert.equal( gmRequest( "/COMPQ A B" ), null );
+	assert.equal( gmRequest( "/RESETQ QNO_CH_CHEF_1" ), null );
+	assert.throws( () => gmRequest( "/REMOVEQ " + "Q".repeat( 128 ) ), /Invalid GM name/ );
+	// The refactored name arms keep their frames.
+	assert.deepEqual( frame( "/FINDUSER Remo" ), [ 1, 4, 0, ...ascii( "Remo" ) ] );
+});
+
 test("ZOE and MOBKILL compose the native subcmd 12 and 20 frames", () => {
 	const refs = new Map( [ [ "MOB_CH_MANGNYANG", { refObjId: 0x1234, monsterType: 0 } ] ] );
 	const monster = codename => refs.get( codename );

@@ -581,73 +581,6 @@ func (rt *Runtime) CompleteTalkQuest(character *enterworld.Character, codename s
 
 /*
 ================
-HandleGiveUp
-
-Abandon an active, abandonable quest without appending completion history.
-Cleanup items and journal removal share one transaction.
-================
-*/
-func (rt *Runtime) HandleGiveUp(character *enterworld.Character, payload []byte) (OpResult, error) {
-	refID, err := DecodeQuestRefRequest(payload)
-	if err != nil {
-		return OpResult{}, err
-	}
-	def, ok := rt.Defs.ByRefID(refID)
-	if !ok {
-		return OpResult{}, fmt.Errorf("quest give-up: id %d has no loaded definition", refID)
-	}
-	if def.KindByte == 2 {
-		// The kind-2 window's button composes 0x729A, never 0x71EB
-		// (sub_5c2440 @0x005c2465): a give-up for a reward-kind quest
-		// is a crafted frame.
-		return OpResult{}, fmt.Errorf("quest give-up: %s (id %d) is kind 2 (reward) - the client cannot compose 0x71EB for it", def.Codename, refID)
-	}
-
-	var refusal error
-	var inventoryFrames []wire.Frame
-	changed := rt.deps.Update(character, "quest-giveup", func() bool {
-		if character == nil || character.DeletePending {
-			refusal = fmt.Errorf("quest give-up: character unavailable")
-			return false
-		}
-		at := activeQuestIndex(character, refID)
-		if at < 0 {
-			refusal = fmt.Errorf("quest give-up: %s (id %d) is not active", def.Codename, refID)
-			return false
-		}
-		if len(def.Stages) > 0 && character.ActiveQuests[at].Stage > 0 {
-			refusal = fmt.Errorf("quest tutorial already advanced; abandonment would reset paid stages")
-			return false
-		}
-		rows, frames, err := rt.planQuestCleanup(character, def)
-		if err != nil {
-			refusal = err
-			return false
-		}
-		character.MissionInventory, inventoryFrames = rows, frames
-		next := make([]enterworld.ActiveQuestRecord, 0, len(character.ActiveQuests)-1)
-		next = append(next, character.ActiveQuests[:at]...)
-		next = append(next, character.ActiveQuests[at+1:]...)
-		character.ActiveQuests = next
-		objectives, _ := rt.applyInventoryChange(character)
-		inventoryFrames = append(inventoryFrames, objectives...)
-		rt.releasePeriodStart(def)
-		return true
-	})
-	if refusal != nil {
-		return OpResult{}, refusal
-	}
-	if !changed {
-		return OpResult{}, fmt.Errorf("quest give-up: character is no longer authoritative")
-	}
-	if def.Codename == ivyMaterialQuest {
-		rt.ForgetItemUse(character)
-	}
-	return OpResult{Frames: append(inventoryFrames, wire.Frame{Opcode: OpQuestUpdate, Payload: EncodeQuestUpdateAbandon(refID)})}, nil
-}
-
-/*
-================
 HandleRewardSelect
 
 Only kind-2 quests admit the native reward-window request. Acknowledge after
@@ -710,7 +643,24 @@ without choices). A selection quest refuses any completion without one.
 ================
 */
 func (rt *Runtime) completeRewardChoice(character *enterworld.Character, def *Definition, expectedStage *uint16, npc string, choice int) (OpResult, error) {
+	return rt.settleReward(character, def, expectedStage, npc, choice, false)
+}
+
+/*
+================
+settleReward
+
+The reward transaction. force is the GM /COMPQ: the objective, the turn-in
+fee and the choice pick are waived, and consumption takes only what the
+character holds, so every other rule (inventory room, experience, history,
+stage advance) still runs through the one owner.
+================
+*/
+func (rt *Runtime) settleReward(character *enterworld.Character, def *Definition, expectedStage *uint16, npc string, choice int, force bool) (OpResult, error) {
 	refID := def.RefID
+	if force && choice == noRewardChoice {
+		choice = firstOfferedChoice(def, enterworld.NativeCountryByte9C(character))
+	}
 	if len(def.RewardChoices) > 0 && !rewardChoiceOffered(def, enterworld.NativeCountryByte9C(character), choice) {
 		return OpResult{}, fmt.Errorf("quest reward: %s needs one of its %d reward choices", def.Codename, len(def.RewardChoices))
 	}
@@ -759,13 +709,17 @@ func (rt *Runtime) completeRewardChoice(character *enterworld.Character, def *De
 			refusal = fmt.Errorf("quest stage inventory owner unavailable")
 			return false
 		}
-		if !stageObjectiveMet(character, def, character.ActiveQuests[at]) {
+		if !force && !stageObjectiveMet(character, def, character.ActiveQuests[at]) {
 			refusal = fmt.Errorf("quest reward: %s (id %d) objective incomplete (%d/%d)", def.Codename, refID, recordProgress(character.ActiveQuests[at]), objectiveRequired(def))
 			return false
 		}
+		turnInGold := def.TurnInGold
+		if force {
+			turnInGold = 0
+		}
 		// 8CF8F0 asks for the fee once the objective is met, before any
 		// reward is paid: a character short of it keeps the quest.
-		if def.TurnInGold > 0 && creditGold(character.Gold, 0) < def.TurnInGold {
+		if turnInGold > 0 && creditGold(character.Gold, 0) < turnInGold {
 			refusal = &dialogueRefusal{
 				fmt.Errorf("quest reward: %s needs %d gold", def.Codename, def.TurnInGold),
 				def.TurnInGoldShortSymbol,
@@ -801,6 +755,9 @@ func (rt *Runtime) completeRewardChoice(character *enterworld.Character, def *De
 			consume = append(consume, exchangeReturns(character, def)...)
 			consume = append(consume, questToolCleanup(character, def)...)
 			consume = append(consume, optionalMissionCleanup(character, def)...)
+			if force {
+				consume = clampToHeld(character, consume)
+			}
 			var grants []inventory.ItemAmount
 			for _, r := range rewardItemsWithChoice(def, choice) {
 				grants = append(grants, inventory.ItemAmount{Codename: rewardItemForCharacter(character, r.ItemCodename), Count: r.Count * count})
@@ -814,9 +771,15 @@ func (rt *Runtime) completeRewardChoice(character *enterworld.Character, def *De
 		if def.RewardExp > 0 || def.RewardSkillExp > 0 {
 			var applied bool
 			experienceFrames, applied = rt.ApplyExperience(character, def.RewardExp, def.RewardSkillExp, 0)
-			if !applied {
+			// At the level cap the grant clamps to nothing. An ordinary
+			// turn-in refuses rather than lose the reward; /COMPQ is a GM
+			// test tool and completes for the gold and items it can pay.
+			if !applied && !force {
 				refusal = fmt.Errorf("quest reward: %s (id %d) experience could not be applied", def.Codename, refID)
 				return false
+			}
+			if !applied {
+				experienceFrames = nil
 			}
 		}
 		if inventoryRows != nil {
@@ -850,9 +813,9 @@ func (rt *Runtime) completeRewardChoice(character *enterworld.Character, def *De
 			creditPredecessorCompletions(character, rt.Defs)
 		}
 		objectiveFrames, _ = rt.applyInventoryChange(character)
-		if def.RewardGold > 0 || def.TurnInGold > 0 {
+		if def.RewardGold > 0 || turnInGold > 0 {
 			// The fee leaves after the reward is paid (8CF8F0), checked above.
-			balance := creditGold(character.Gold, def.RewardGold) - def.TurnInGold
+			balance := creditGold(character.Gold, def.RewardGold) - turnInGold
 			character.Gold = &balance
 			goldFrame = &wire.Frame{
 				Opcode:  wire.OpPointsUpdate,
