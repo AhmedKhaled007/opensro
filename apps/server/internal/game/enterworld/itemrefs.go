@@ -111,8 +111,11 @@ ItemCommandReference
 ================
 */
 type ItemCommandReference struct {
-	RefObjID  uint32 `json:"refObjId"`
-	Codename  string `json:"codename"`
+	RefObjID uint32 `json:"refObjId"`
+	Codename string `json:"codename"`
+	// Name is the English display name (textdataname.txt column 8) the GM
+	// console helper lists beside the codename.
+	Name      string `json:"name"`
 	TypeFlags uint16 `json:"typeFlags"`
 	MaxStack  uint16 `json:"maxStack"`
 }
@@ -133,7 +136,7 @@ func (t *TextdataItems) ItemCommandReferences() []ItemCommandReference {
 		if cap > 65535 {
 			cap = 65535
 		}
-		rows = append(rows, ItemCommandReference{r.RefObjID, r.Codename, r.TypeFlags(), uint16(cap)})
+		rows = append(rows, ItemCommandReference{r.RefObjID, r.Codename, r.Name, r.TypeFlags(), uint16(cap)})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].RefObjID < rows[j].RefObjID })
 	return rows

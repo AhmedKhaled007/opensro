@@ -133,6 +133,8 @@ import { playerInfoJob } from "@/engine/foundation/gameplay/player-info-job";
 import { MALL_NOTIFY_HEIGHT, MALL_NOTIFY_WIDTH, mallNotifyOrigin } from "@/engine/foundation/ui/mall-notify";
 import { jobContributionSelf, jobRankPage, jobRankPages } from "@/engine/foundation/gameplay/job-rank";
 import { createMapTeleport } from "./hud/map-teleport";
+import { createGmHelper, GM_HELPER_HEIGHT, GM_HELPER_ROWS, GM_HELPER_ROW_HEIGHT } from "./hud/gm-helper";
+import type { GmCatalog } from "@/engine/foundation/gameplay/gm-command";
 import { SkillSlot_Resolve } from "./hud/skill-slot";
 import { ACADEMY_OPEN_LEVEL, academyRank } from "@/engine/foundation/gameplay/academy";
 import { createWindowPlacement } from "./hud/window-placement";
@@ -1141,6 +1143,10 @@ export function createUi(
 	const skillTraining = createSkillTrainingCache();
 	const withdrawal = createWithdrawalDialog();
 	const mapTeleport = createMapTeleport();
+	const gmHelper = createGmHelper();
+	// The worker repeats a GM's catalogue until this owner acknowledges the
+	// exact object it consumed; a new entry builds a new object.
+	let gmCatalogSeen: GmCatalog | null = null, gmCatalogAcked = false;
 	const gauges = createGaugePresentation();
 	const regionBanner = createRegionBanner();
 	const hudMessages = createHudMessages( chooseTip );
@@ -2714,6 +2720,25 @@ export function createUi(
 		const partyLine = id === "chat-send" ?
 			partyChatCommand( chatText.slice( chatTabPrefix( chatTab ).length ), hudCopy ) :
 			null;
+		if ( id.startsWith( "gm-helper-row:" ) ) {
+			gmHelper.select( Number( id.slice( "gm-helper-row:".length ) ) );
+			// The row button took DOM focus; Enter must reach the prompt again
+			// so it can run the row the GM just clicked.
+			focusRequest = { id: "gm-input", revision: ++focusRevision, caret: consoleText.length };
+			dirty = true;
+			return;
+		}
+		if ( id.startsWith( "gm-helper-tab:" ) ) {
+			const tab = id.slice( "gm-helper-tab:".length );
+			if ( tab === "items" || tab === "monsters" || tab === "uniques" ) {
+				gmHelper.selectTab( tab );
+				consoleText = "";
+				selection = [ 0, 0 ];
+				focusRequest = { id: "gm-input", revision: ++focusRevision, caret: 0 };
+			}
+			dirty = true;
+			return;
+		}
 		if ( panel === "Experimental" && id.startsWith( "experimental-" ) ) {
 			const row = EXPERIMENTAL_TABS.flatMap( tab => tab.rows ).find( candidate => candidate.id === id );
 			if ( id.startsWith( "experimental-tab:" ) ) experimental.selectTab( Number( id.slice( 17 ) ) );
@@ -3130,15 +3155,19 @@ export function createUi(
 		}
 		if ( id === "submit" && consolePhase !== 0 && view.gameplay?.eligibility?.gm ) {
 			if ( consoleText && !composing ) {
-				appendConsoleLine( consoleText );
-				consoleHistory = [ ...consoleHistory.slice( -199 ), consoleText ];
+				// Enter over an open catalogue runs the highlighted row with the
+				// composer's default amount; otherwise the line is sent as typed.
+				gmHelper.observe( consoleText, GM_HELPER_ROWS );
+				const line = gmHelper.run( consoleText );
+				appendConsoleLine( line );
+				consoleHistory = [ ...consoleHistory.slice( -199 ), line ];
 				consoleHistoryIndex = consoleHistory.length;
 				// 50F260 tries a GM command, then the command.txt table. Their names
 				// are disjoint (the table lookup is case-sensitive), so the table
 				// match decides which owner takes the line.
-				const command = debugCommand( hud.data()?.commandTable ?? new Map(), consoleText );
+				const command = debugCommand( hud.data()?.commandTable ?? new Map(), line );
 				if ( command ) runDebugCommand( command );
-				else sendGameplay( { kind: "gm-command", line: consoleText } );
+				else sendGameplay( { kind: "gm-command", line } );
 				consoleText = "";
 				selection = [ 0, 0 ];
 				focusRequest = { id: "gm-input", revision: ++focusRevision, caret: 0 };
@@ -6125,6 +6154,13 @@ export function createUi(
 				dirty = true;
 				return;
 			}
+			if ( event.kind === "scroll" && consolePhase !== 0 && gmHelper.active() ) {
+				if ( event.x >= 0 && event.x <= 600 && event.y >= consoleY && event.y <= consoleY + GM_HELPER_HEIGHT ) {
+					gmHelper.move( Math.sign( event.delta ) * 3 );
+					dirty = true;
+				}
+				return;
+			}
 			if ( event.kind === "scroll" && panel === "Blocking" ) {
 				const area = controls.find( c => c.id === "blocking-list" );
 				if ( area && containsPoint( area.rect, event.x, event.y ) ) {
@@ -6134,6 +6170,74 @@ export function createUi(
 				return;
 			}
 
+			// F3 is the VSRO-style item browser: it opens the GM console (or
+			// just the list when it is already open) with every item, and a
+			// second press closes the list.
+			if (
+				event.kind === "key" && event.code === "F3" && view?.session?.phase === "world" &&
+				view.gameplay?.eligibility?.gm
+			) {
+				if ( gmHelper.browsing() ) gmHelper.closeBrowse();
+				else {
+					// F3 is a browse key, not the native console slide: show the
+					// whole list at once so its first row is not clipped.
+					if ( consolePhase === 0 || consolePhase === 2 ) {
+						consolePhase = 3;
+						consoleY = 0;
+					}
+					consoleText = "";
+					selection = [ 0, 0 ];
+					gmHelper.open( "items" );
+					focus = "gm-input";
+					focusRequest = { id: "gm-input", revision: ++focusRevision, caret: 0 };
+				}
+				dirty = true;
+				return;
+			}
+			// The catalogue list takes the arrow, page and Tab keys while it is
+			// open; history still owns them when no list is showing.
+			if (
+				event.kind === "key" && focus === "gm-input" && consolePhase !== 0 && view?.gameplay?.eligibility?.gm
+			) {
+				gmHelper.observe( consoleText, GM_HELPER_ROWS );
+				if ( gmHelper.active() ) {
+					if ( event.code === "ArrowLeft" || event.code === "ArrowRight" ) {
+						gmHelper.cycle( event.code === "ArrowLeft" ? -1 : 1 );
+						dirty = true;
+						return;
+					}
+					if ( event.code === "ArrowUp" || event.code === "ArrowDown" ) {
+						gmHelper.move( event.code === "ArrowUp" ? -1 : 1 );
+						dirty = true;
+						return;
+					}
+					if ( event.code === "PageUp" || event.code === "PageDown" ) {
+						gmHelper.page( event.code === "PageUp" ? -1 : 1 );
+						dirty = true;
+						return;
+					}
+					if ( event.code === "Tab" ) {
+						const completed = gmHelper.complete( consoleText );
+						if ( completed !== consoleText ) {
+							consoleText = completed;
+							selection = [ completed.length, completed.length ];
+							focusRequest = { id: "gm-input", revision: ++focusRevision, caret: completed.length };
+						}
+						dirty = true;
+						return;
+					}
+				}
+			}
+			if (
+				event.kind === "key" && event.code === "Escape" && consolePhase !== 0 && gmHelper.active()
+			) {
+				// Escape closes the list first; the console stays open and keeps
+				// the prompt focused for the amount the GM still has to type.
+				gmHelper.dismiss( consoleText );
+				focusRequest = { id: "gm-input", revision: ++focusRevision, caret: consoleText.length };
+				dirty = true;
+				return;
+			}
 			// 50EBC0 owns history independently of console output. At either list
 			// sentinel native leaves the editor unchanged; Down does not restore a draft.
 			if (
@@ -6158,6 +6262,7 @@ export function createUi(
 				((event.code === "Backquote" && event.shift) || (event.code === "Escape" && consolePhase !== 0))
 			) {
 				consolePhase = consolePhase === 0 || consolePhase === 2 ? 1 : 2;
+				if ( consolePhase === 2 ) gmHelper.reset();
 				focus = consolePhase === 1 ? "gm-input" : null;
 				focusRequest = { id: focus, revision: ++focusRevision, caret: consoleText.length };
 				dirty = true;
@@ -8086,6 +8191,16 @@ export function createUi(
 						!!view.gameplay?.localGid));
 			nextPoll = now + 100;
 			view = next;
+			const gmCatalog = next.gameplay?.gmCatalog;
+			if ( gmCatalog && gmCatalog !== gmCatalogSeen ) {
+				gmCatalogSeen = gmCatalog;
+				gmCatalogAcked = false;
+				gmHelper.setCatalog( gmCatalog );
+			}
+			if ( gmCatalog && !gmCatalogAcked ) {
+				gmCatalogAcked = true;
+				sendGameplay( { kind: "gm-catalog-ack" } );
+			}
 			probe?.detailBegin( "ui-assembly" );
 			uiNow = now;
 			const specialty = specialtyDealHud.state();
@@ -8154,6 +8269,10 @@ export function createUi(
 				consoleRows = [];
 				consoleHistory = [];
 				consoleHistoryIndex = 0;
+				gmCatalogSeen = null;
+				gmCatalogAcked = false;
+				gmHelper.setCatalog( null );
+				gmHelper.reset();
 				// Leaving the world rebaselines (-1) rather than rewinds: retained
 				// replies must not be shown again on re-entry or after a teleport.
 				if ( phase !== "world" ) gmObserved = -1;
@@ -23847,23 +23966,108 @@ export function createUi(
 				}
 			}
 			if ( worldVisible && consolePhase !== 0 && game?.eligibility?.gm ) {
-				const r: UiRect = [ 0, consoleY, 600, 112 ];
+				// The catalogue list grows the native 600x112 panel downward.
+				// It is port-only, so it uses a solid panel behind its two
+				// columns instead of the native fade that would leave the name
+				// column hard to read.
+				const catalog = gmHelper.observe( consoleText, GM_HELPER_ROWS ),
+					panelHeight = catalog.active ? GM_HELPER_HEIGHT : 112,
+					r: UiRect = [ 0, consoleY, 600, panelHeight ];
 				blocks.push( r );
-				// 720090: fixed 600x112. 5086E0: black alpha C8 at left, 0 at right.
-				quads.push( {
-					rect: r,
-					uv: [ 0, 0, 1, 1 ],
-					color: [ 0, 0, 0, 200 / 255 ],
-					rightColor: [ 0, 0, 0, 0 ],
-					texture: "",
-					clip: full
-				} );
-				for ( const [i, row] of consoleRows.slice( -7 ).entries() ) {
-					label( row, 5, consoleY + 2 + i * 13, [ 200 / 255, 200 / 255, 200 / 255, 1 ], r );
+				if ( catalog.active ) {
+					quads.push( {
+						rect: r,
+						uv: [ 0, 0, 1, 1 ],
+						color: [ 0, 0, 0, 215 / 255 ],
+						rightColor: [ 0, 0, 0, 215 / 255 ],
+						texture: "",
+						clip: full
+					} );
+					const counts = gmHelper.counts(),
+						activeTab = gmHelper.tab(),
+						tabs = [
+							[ "items", "Items", counts.items ],
+							[ "monsters", "Monsters", counts.monsters ],
+							[ "uniques", "Uniques", counts.uniques ]
+						] as const;
+					let tabX = 6;
+					for ( const [id, name, count] of tabs ) {
+						const value = name + " " + count, chosen = id === activeTab;
+						label(
+							value,
+							tabX,
+							consoleY + 2,
+							chosen ? [ 1, 128 / 255, 1, 1 ] : [ 160 / 255, 160 / 255, 160 / 255, 1 ],
+							r
+						);
+						const width = text.run( value ).width + 8;
+						controls.push( {
+							id: "gm-helper-tab:" + id,
+							label: name,
+							kind: "button",
+							rect: [ tabX - 2, consoleY + 2, width, 14 ]
+						} );
+						tabX += width + 8;
+					}
+					const listTop = consoleY + 20,
+						listHeight = panelHeight - 44,
+						visibleRows = Math.max( 1, Math.floor( listHeight / GM_HELPER_ROW_HEIGHT ) );
+					if ( !catalog.rows.length ) {
+						label( "No matching codename", 5, listTop, [ 200 / 255, 200 / 255, 200 / 255, 1 ], r );
+					}
+					catalog.rows.forEach( ( row, i ) => {
+						const index = catalog.first + i,
+							y = listTop + i * GM_HELPER_ROW_HEIGHT,
+							chosen = index === catalog.selected,
+							color = chosen ?
+								[ 1, 1, 1, 1 ] as const :
+								[ 200 / 255, 200 / 255, 200 / 255, 1 ] as const;
+						if ( chosen ) {
+							rect( [ 0, y, 600, GM_HELPER_ROW_HEIGHT ], [ .2, .4, .7, .6 ], "", [ 0, 0, 1, 1 ], r );
+						}
+						label( row.codename, 5, y, color, [ 0, y, 295, 22 ] );
+						label( row.name, 300, y, color, [ 300, y, 300, 22 ] );
+						controls.push( {
+							id: "gm-helper-row:" + index,
+							label: row.codename + " " + row.name,
+							kind: "button",
+							rect: [ 0, y, 600, GM_HELPER_ROW_HEIGHT ]
+						} );
+					} );
+					if ( catalog.total > visibleRows ) {
+						const track: UiRect = [ 596, listTop, 4, listHeight ],
+							thumbHeight = Math.max( 12, Math.round( listHeight * visibleRows / catalog.total ) ),
+							maxFirst = Math.max( 1, catalog.total - visibleRows ),
+							thumbY = listTop +
+								Math.round( (listHeight - thumbHeight) * catalog.first / maxFirst );
+						rect( track, [ 0, 0, 0, 120 / 255 ], "", [ 0, 0, 1, 1 ], r );
+						rect(
+							[ 596, thumbY, 4, thumbHeight ],
+							[ 160 / 255, 160 / 255, 160 / 255, 220 / 255 ],
+							"",
+							[ 0, 0, 1, 1 ],
+							r
+						);
+					}
+				} else {
+					// 720090: fixed 600x112. 5086E0: black alpha C8 at left, 0 at right.
+					quads.push( {
+						rect: r,
+						uv: [ 0, 0, 1, 1 ],
+						color: [ 0, 0, 0, 200 / 255 ],
+						rightColor: [ 0, 0, 0, 0 ],
+						texture: "",
+						clip: full
+					} );
+					for ( const [i, row] of consoleRows.slice( -7 ).entries() ) {
+						label( row, 5, consoleY + 2 + i * 13, [ 200 / 255, 200 / 255, 200 / 255, 1 ], r );
+					}
 				}
-				const pink = [ 1, 128 / 255, 1, 1 ] as const, px = 5 + text.run( "C:>" ).width + 2;
-				label( "C:>", 5, consoleY + 96, pink, r );
-				const edit: UiRect = [ px, consoleY + 96, 600 - px, 16 ],
+				const inputY = consoleY + panelHeight - 16,
+					pink = [ 1, 128 / 255, 1, 1 ] as const,
+					px = 5 + text.run( "C:>" ).width + 2;
+				label( "C:>", 5, inputY, pink, r );
+				const edit: UiRect = [ px, inputY, 600 - px, 16 ],
 					start = Math.max( 0, Math.min( consoleText.length, selection[0] ?? 0 ) ),
 					end = Math.max( start, Math.min( consoleText.length, selection[1] ?? start ) );
 				const before = text.run( consoleText.slice( 0, start ) ).width,
@@ -23893,7 +24097,7 @@ export function createUi(
 					label: "GM command",
 					kind: "text",
 					value: consoleText,
-					rect: [ px, consoleY + 96, 600 - px, 16 ],
+					rect: [ px, inputY, 600 - px, 16 ],
 					maxLength: 255
 				} );
 			}

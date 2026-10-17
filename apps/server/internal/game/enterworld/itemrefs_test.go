@@ -35,6 +35,38 @@ func TestProjectedConsumableNames(t *testing.T) {
 	}
 }
 
+// TestItemCommandReferencesCarryDisplayNames pins the GM console helper's
+// catalogue: every /MAKEITEM row names the item's English title beside its
+// codename, and the blade row the helper tests use keeps both.
+/*
+================
+TestItemCommandReferencesCarryDisplayNames
+================
+*/
+func TestItemCommandReferencesCarryDisplayNames(t *testing.T) {
+	licensed.RequireGameData(t)
+	items := NewTextdataItems(gamedatatest.TextdataDir(t))
+	rows := items.ItemCommandReferences()
+	if len(rows) == 0 {
+		t.Fatal("no item command references loaded")
+	}
+	found := false
+	for _, row := range rows {
+		if strings.TrimSpace(row.Name) == "" {
+			t.Errorf("item command row without a display name: %d %s", row.RefObjID, row.Codename)
+		}
+		if row.Codename == "ITEM_CH_BLADE_01_A" {
+			found = true
+			if row.RefObjID != 107 || row.Name != "Copper Blade" {
+				t.Errorf("blade command row: got id %d name %q, want id 107 name Copper Blade", row.RefObjID, row.Name)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("blade command row missing")
+	}
+}
+
 func TestEveryProjectedItemHasDisplayName(t *testing.T) {
 	licensed.RequireGameData(t)
 	dir := gamedatatest.TextdataDir(t)

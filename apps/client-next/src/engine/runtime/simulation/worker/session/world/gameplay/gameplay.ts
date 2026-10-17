@@ -104,7 +104,14 @@ import {
 	partyActiveJob,
 	partyPurposeAllowed
 } from "@/engine/foundation/gameplay/party-matching";
-import { gmRequest, gmReply, gmItemReferences, type GmReply } from "@/engine/foundation/gameplay/gm-command";
+import {
+	gmCatalog as decodeGmCatalog,
+	gmRequest,
+	gmReply,
+	gmItemReferences,
+	type GmCatalog,
+	type GmReply
+} from "@/engine/foundation/gameplay/gm-command";
 import { decodeReverseMapPoints, type ReverseMapPoint } from "@/engine/foundation/gameplay/reverse-return-map";
 import {
 	fortressBootstrap,
@@ -382,6 +389,10 @@ export function createGameplay(
 	> = {};
 	let partyMatching = emptyPartyMatching();
 	let gmItems = gmItemReferences( {} );
+	// Port-only: the compact catalogues a GM's console helper filters. Built
+	// only for a GM entry; ordinary characters never pay for the list. The
+	// snapshot repeats them until the UI acknowledges receipt.
+	let gmCatalog: GmCatalog | null = null, gmCatalogPending = false;
 	// The server's port-only storage auto-stack rule (storageAutoStack).
 	let storageAutoStack = false;
 	// The shard's client tuning from the world-entry bootstrap (ui-tuning.ts).
@@ -1056,6 +1067,8 @@ selected entities, cooldowns or world-entry state.
 		selectionDecal = null;
 		uniqueRefs = uniqueReferences( {} );
 		gmItems.clear();
+		gmCatalog = null;
+		gmCatalogPending = false;
 		gmReplies = [];
 		tradeStars = 0;
 		notices = [];
@@ -1218,6 +1231,8 @@ resends nothing. Wiping them here made the next 0x3E58 type-6 row throw
 				if ( flag !== undefined && typeof flag !== "boolean" ) throw Error( "Invalid entry eligibility" );
 			}
 			eligibility = { gm: identity?.gmPrivilege === true, pcRoomEvent: identity?.pcRoomEvent === true };
+			gmCatalog = eligibility.gm ? decodeGmCatalog( value ) : null;
+			gmCatalogPending = gmCatalog !== null;
 			potionTimers.fill( emptyAutoPotionTimer() );
 			autoPotionInputBlocked = false;
 			autoPotionItemMallOpen = false;
@@ -1563,6 +1578,10 @@ state here before a command can claim a native wire conversation.
 			entity: EntityState | undefined,
 			local?: EntityState
 		): WireFrame | null {
+			if ( command.kind === "gm-catalog-ack" ) {
+				gmCatalogPending = false;
+				return null;
+			}
 			dirty = true;
 			soundClock = now;
 			if ( command.kind === "local-notice" ) {
@@ -4384,6 +4403,7 @@ The published plane when something changed since the last take, else null.
 				gmReplies,
 				tradeStars,
 				eligibility,
+				...(gmCatalogPending && gmCatalog ? { gmCatalog } : {}),
 				autoPotion,
 				selectionDecal,
 				notices,

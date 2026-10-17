@@ -41,6 +41,40 @@ test('GM console uses production input, authority gates and reply channels',{tim
    await input.press(key);await page.evaluate(()=>flagFixture.draw());assert.equal(await input.inputValue(),value);
   }
   assert.equal(await page.evaluate(()=>flagFixture.commands.length),commandCount,'history navigation never executes commands or recalls server output');
+  // The inline catalogue: the list draws, arrows move the selection, Tab
+  // inserts the codename and Enter runs it with the row's default amount.
+  await page.evaluate(()=>{
+   flagFixture.state.gameplay={...flagFixture.state.gameplay,gmCatalog:{
+    items:[
+     {codename:'ITEM_CH_BLADE_01_A',name:'Copper Blade',typeFlags:42},
+     {codename:'ITEM_ETC_HP_POTION_05',name:'HP recovery potion (X-large)',typeFlags:6380}
+    ],
+    monsters:[
+     {codename:'MOB_CH_MANGNYANG',name:'Mangyang',monsterType:0},
+     {codename:'MOB_CH_TIGERWOMAN',name:'Tiger Woman',monsterType:3}
+    ]
+   }};
+   flagFixture.draw();
+  });
+  const gmInput=page.locator('[data-ui-id="gm-input"]');
+  await gmInput.fill('/MAKEITEM ');await page.evaluate(()=>flagFixture.draw());
+  assert.ok(await page.locator('[data-ui-id^="gm-helper-row:"]').count()>0,'catalogue rows draw above the prompt');
+  await gmInput.press('ArrowDown');await page.evaluate(()=>flagFixture.draw());
+  await gmInput.press('Tab');await page.evaluate(()=>flagFixture.draw());
+  assert.equal(await gmInput.inputValue(),'/MAKEITEM ITEM_ETC_HP_POTION_05 ');
+  await gmInput.press('Enter');await page.evaluate(()=>flagFixture.draw());
+  assert.deepEqual(await page.evaluate(()=>flagFixture.commands.at(-1)),{kind:'gameplay',command:{kind:'gm-command',line:'/MAKEITEM ITEM_ETC_HP_POTION_05 1'}});
+  // F3 opens Items; Right moves to Monsters and then Uniques, whose row is a
+  // /LOADMONSTER command.
+  await gmInput.press('F3');await page.evaluate(()=>flagFixture.draw());
+  await gmInput.press('ArrowRight');await page.evaluate(()=>flagFixture.draw());
+  await gmInput.press('ArrowRight');await page.evaluate(()=>flagFixture.draw());
+  const uniqueRows=await page.locator('[data-ui-id^="gm-helper-row:"]').evaluateAll(nodes=>nodes.map(node=>node.textContent));
+  assert.deepEqual(uniqueRows,['MOB_CH_TIGERWOMAN Tiger Woman']);
+  await gmInput.press('Tab');await page.evaluate(()=>flagFixture.draw());
+  assert.equal(await gmInput.inputValue(),'/LOADMONSTER MOB_CH_TIGERWOMAN ');
+  await gmInput.press('Enter');await page.evaluate(()=>flagFixture.draw());
+  assert.deepEqual(await page.evaluate(()=>flagFixture.commands.at(-1)),{kind:'gameplay',command:{kind:'gm-command',line:'/LOADMONSTER MOB_CH_TIGERWOMAN 1'}});
   assert.deepEqual(await page.evaluate(()=>flagFixture.ui.stats().failed),[]);assert.equal(await page.evaluate(()=>flagFixture.renderer.error()),null);
   await mkdir('temp/artifacts/intro-event-gm',{recursive:true});await page.screenshot({path:'temp/artifacts/intro-event-gm/console.png'});
   await page.evaluate(()=>{(document.activeElement??document.body).dispatchEvent(new KeyboardEvent('keydown',{code:'Backquote',key:'Backquote',shiftKey:true,bubbles:true}));});
