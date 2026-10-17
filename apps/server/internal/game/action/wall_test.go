@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"opensro.online/server/internal/game/enterworld"
+	"opensro.online/server/internal/game/item/grounditem"
 	"opensro.online/server/internal/game/item/wire"
 	"opensro.online/server/internal/game/world/monster"
+	"opensro.online/server/internal/game/world/simulation"
 )
 
 const (
@@ -218,33 +220,156 @@ func TestWallBreaksRetiresAndBlocksASecondWall(t *testing.T) {
 ================
 TestWallRootsItsCasterUntilItRetires
 
-The wall path of CastLifecycle_ProcessPersistent (584337) never releases
-the cast (no mode-1 B505), and the caster's moves are dropped while the
-wall stands (4EF880 -> 4AAB40, char+C08). Once the wall breaks the caster
-walks again.
+CastLifecycle_ProcessPersistent (5830B0) releases the wall's stage-0 WAIT
+at ActionCastingTimeMs with a single mode-1 B505 (584088..58408A ->
+59AE10(1, 0, castToken, 0)), so the client completes ANI_SKILL_4 to idle
+and extinguishes the READY hand effects (8E2C90 -> 8DF180 -> 8DF480). No
+mode-2 B505 is sent while the wall stands. Natively the wall roots
+through motion state 11 (593690..5936A5); CGObjChar_IsAttackLocked
+(4AAB40..4AAB5A) reads char+C08 / char+C44, so the port folds char+C0C
+into PlayerAttackLocked for the wall's lifetime: both ground clicks and
+auto-navigator pursuit/pickup walks are dropped until the wall retires,
+an in-range basic attack is held (4AD91A..4AD929), and an in-range skill
+cast still fires in place (4AE590).
 ================
 */
 func TestWallRootsItsCasterUntilItRetires(t *testing.T) {
-	rt, clock, c, mob := wallFixture(t, crystalWallA1, 5)
+	rt, clock, c, mob := newCombatTestRuntime(t, 100000)
+	c.BattleUntilMs = 0
+	c.Strength = testInt64(500)
+	c.CurrentHP = nil
+	learnWall(t, rt, c, crystalWallA1)
+	mob.Ref.DefaultSkillIDs[0] = 2
+	skills := rt.deps.SkillData().(staticSkillSource)
+	attack := skills[2]
+	attack.Attack.Min, attack.Attack.Max, attack.Attack.Percent, attack.Attack.Flags = 60, 60, 100, 5
+	skills[2] = attack
+
+	if r := castSelf(rt, c, crystalWallA1); r.DiagnosticRefusal != "" || !hasSkillEffect(rt, c.Name, crystalWallA1) {
+		t.Fatalf("wall cast: %+v", r)
+	}
+	wall, ok := rt.standingWallOf(testDivision, c.Name)
+	if !ok {
+		t.Fatal("no wall in the slot")
+	}
+	mode1Releases := 0
 	for i := 0; i < 50; i++ {
 		clock.Advance(100 * time.Millisecond)
 		for _, burst := range rt.TickHook()(clock.NowMs()) {
 			for _, f := range burst.Frames {
-				if f.Opcode == wire.OpSkillEffectControl && len(f.Payload) > 0 && f.Payload[0] == 1 {
-					t.Fatal("the wall's cast was released (mode 1)")
+				if f.Opcode != wire.OpSkillEffectControl || len(f.Payload) < 6 {
+					continue
+				}
+				switch f.Payload[0] {
+				case 1:
+					if len(f.Payload) >= 5 && binary.LittleEndian.Uint32(f.Payload[1:]) == wall.token {
+						mode1Releases++
+					}
+				case 2:
+					if len(f.Payload) >= 6 && binary.LittleEndian.Uint32(f.Payload[2:]) == wall.token {
+						t.Fatal("the standing wall's cast was closed with mode-2 B505")
+					}
 				}
 			}
 		}
 	}
+	if mode1Releases != 1 {
+		t.Fatalf("wall mode-1 B505 releases = %d, want 1 (58408A)", mode1Releases)
+	}
 	if !rt.PlayerAttackLocked(testDivision, c.Name) {
 		t.Fatal("the caster may walk out of a standing wall")
 	}
+
+	// Out-of-range combat pursuit and out-of-range ground-item pickup must
+	// not walk the caster out of the standing wall (4B0490 -> 4B0EA0 -> 4B0F8E).
+	worldKey := simulation.WorldKey(testDivision, c.Name)
+	start := rt.liveSpawn(worldKey, c.Snapshot(), clock.NowMs())
+	farDrop := rt.Ground.Add(testDivision, grounditem.Item{
+		RefObjID:   62,
+		Codename:   "ITEM_ETC_GOLD_02",
+		TypeFlags:  wire.PackTypeFlags(3, 3, 5, 2),
+		GoldAmount: 5,
+		Position:   grounditem.Point{RegionID: start.RegionID, X: float32(start.X + 80), Z: float32(start.Z)},
+	})
+	pickupRes := rt.HandleTargetInteract(testDivision, c, wire.TargetInteract{Gid: farDrop.Gid}.Encode())
+	if len(pickupRes.Broadcast) != 0 || len(pickupRes.Frames) != 0 {
+		t.Fatalf("out-of-range pickup moved the caster out of a standing wall: %+v", pickupRes)
+	}
+	if after := rt.liveSpawn(worldKey, c.Snapshot(), clock.NowMs()); after.X != start.X || after.Z != start.Z {
+		t.Fatalf("pickup moved caster from (%v,%v) to (%v,%v)", start.X, start.Z, after.X, after.Z)
+	}
+	pursuitRes := rt.commitIntentMovement(c, c.Snapshot(), intentMovement{
+		intent: basicAttackIntent{DivisionID: testDivision, CharacterName: c.Name, TargetGid: mob.Gid},
+		from:   start,
+		target: start,
+		goal:   simulation.Spawn{RegionID: start.RegionID, X: start.X + 80, Y: start.Y, Z: start.Z},
+		nowMs:  clock.NowMs(),
+	})
+	if len(pursuitRes.Broadcast) != 0 || len(pursuitRes.Frames) != 0 {
+		t.Fatalf("combat pursuit moved the caster out of a standing wall: %+v", pursuitRes)
+	}
+	if after := rt.liveSpawn(worldKey, c.Snapshot(), clock.NowMs()); after.X != start.X || after.Z != start.Z {
+		t.Fatalf("combat pursuit moved caster from (%v,%v) to (%v,%v)", start.X, start.Z, after.X, after.Z)
+	}
+
+	// The in-range intent is held by the same lock (4AD91A..4AD929): no
+	// B245 opens and the monster keeps its HP while the wall stands.
+	before, _ := rt.Monsters.Get(testDivision, mob.Gid)
+	held := rt.advanceBasicAttackIntent(c, basicAttackIntent{
+		DivisionID: testDivision, CharacterName: c.Name, TargetGid: mob.Gid, SkillID: 2,
+	}, clock.NowMs())
+	if len(held.Frames) != 0 || len(held.Broadcast) != 0 {
+		t.Fatalf("basic attack fired through a standing wall: %+v", held)
+	}
+	if after, _ := rt.Monsters.Get(testDivision, mob.Gid); after.CurrentHP != before.CurrentHP {
+		t.Fatalf("held basic attack damaged the monster: %d -> %d", before.CurrentHP, after.CurrentHP)
+	}
+
+	// An in-range skill cast still fires in place (4AE590): the SingleCast
+	// exemption opens its cast and the monster loses HP.
+	smash := shippedOffense(t, "SKILL_CH_SWORD_SMASH_A_01")
+	smash.ChainNext = 0
+	rt.deps.SkillData().(staticSkillSource)[smash.ID] = smash
+	c.Skills = append(c.Skills, smash.ID)
+	c.CurrentMP = testInt64(150)
+	fired := rt.advanceBasicAttackIntent(c, basicAttackIntent{
+		DivisionID: testDivision, CharacterName: c.Name, TargetGid: mob.Gid, SkillID: smash.ID, SingleCast: true,
+	}, clock.NowMs())
+	if smash.ActionCastingTimeMs > 0 {
+		clock.Advance(time.Duration(smash.ActionCastingTimeMs+1) * time.Millisecond)
+		releasePreparedSkillForTest(t, rt, clock.NowMs())
+	}
+	if len(fired.Frames) == 0 || fired.DiagnosticRefusal != "" {
+		t.Fatalf("in-range skill cast refused through a standing wall: %+v", fired)
+	}
+	if after, _ := rt.Monsters.Get(testDivision, mob.Gid); after.CurrentHP >= before.CurrentHP {
+		t.Fatal("in-range skill cast dealt no damage through a standing wall")
+	}
+	rt.ClearCombatIntent(testDivision, c.Name)
+	clock.Advance(time.Duration(smash.ActionDurationMs+1) * time.Millisecond)
+	rt.drainSkillFinalizes(clock.NowMs())
+
 	rt.wallMu.Lock()
 	rt.walls[wallKey(testDivision, c.Name)].pool = 1
 	rt.wallMu.Unlock()
 	wallHit(t, rt, clock, c, mob)
-	rt.TickHook()(clock.NowMs() + 1)
+	clock.Advance(time.Millisecond)
+	rt.TickHook()(clock.NowMs())
 	if rt.PlayerAttackLocked(testDivision, c.Name) {
 		t.Fatal("the caster stays rooted after the wall broke")
+	}
+
+	// With the wall retired the held lane opens: a fresh basic intent
+	// swings in range and the monster loses HP.
+	before, _ = rt.Monsters.Get(testDivision, mob.Gid)
+	swung := rt.advanceBasicAttackIntent(c, basicAttackIntent{
+		DivisionID: testDivision, CharacterName: c.Name, TargetGid: mob.Gid, SkillID: 2,
+	}, clock.NowMs())
+	_, damage, _ := assertSkillDamageOpen(t, swung.Frames, 2, enterworld.ObjectIDForCharacter(c), mob.Gid)
+	if damage == 0 {
+		t.Fatal("basic attack after the wall retired dealt no damage")
+	}
+	if after, _ := rt.Monsters.Get(testDivision, mob.Gid); after.CurrentHP >= before.CurrentHP {
+		t.Fatal("basic attack after the wall retired left the monster's HP untouched")
 	}
 }
