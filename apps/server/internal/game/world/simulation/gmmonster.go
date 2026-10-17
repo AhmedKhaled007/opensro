@@ -80,6 +80,18 @@ client sees the drawn direction.
 ================
 */
 func (s *MonsterState) SpawnGMMonsters(request GMMonsterSpawn) int {
+	return len(s.SpawnGMMonstersTracked(request))
+}
+
+/*
+================
+SpawnGMMonstersTracked
+
+The same command path, returning the created gids so a caller that must act
+on the spawns (/ZOE kills them immediately) can name them.
+================
+*/
+func (s *MonsterState) SpawnGMMonstersTracked(request GMMonsterSpawn) []uint32 {
 	count := int(request.Count)
 	if count < 1 {
 		count = 1
@@ -91,11 +103,11 @@ func (s *MonsterState) SpawnGMMonsters(request GMMonsterSpawn) int {
 	defer s.mu.Unlock()
 	ref, ok := s.template.Refs[request.RefObjID]
 	if !ok || ref.MaxHP == 0 {
-		return 0
+		return nil
 	}
 	state := s.populationForLease(request.Division, request.Population)
 	if state == nil {
-		return 0
+		return nil
 	}
 	center := request.Position
 	spawn := normalizeGeneratedMonsterSpawn(monster.SpawnPoint{
@@ -103,11 +115,11 @@ func (s *MonsterState) SpawnGMMonsters(request GMMonsterSpawn) int {
 	})
 	spawn, valid := s.resolveSpawnGround(spawn, center.Y)
 	if !valid {
-		return 0
+		return nil
 	}
 	rarity := GMSpawnRarity(request.Type, ref.MonsterType)
-	created := 0
-	for ; created < count; created++ {
+	created := make([]uint32, 0, count)
+	for len(created) < count {
 		if s.counter >= domain.MaxMonsterGIDCounter {
 			break
 		}
@@ -140,6 +152,7 @@ func (s *MonsterState) SpawnGMMonsters(request GMMonsterSpawn) int {
 		state.movers.set(actor.Gid, mover)
 		state.behavior.set(actor.Gid, 0)
 		state.byRegion[spawn.RegionID] = append(state.byRegion[spawn.RegionID], actor.Gid)
+		created = append(created, actor.Gid)
 		// 4C10C0 arms every spawned monster's timers, a GM's included.
 		armLifetimeLocked(state, actor, request.NowMs)
 	}

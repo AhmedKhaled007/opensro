@@ -28,6 +28,10 @@ const GM_SET_SPEED = 0xf1;
 const GM_SPEED_NORMAL_PERCENT = 100;
 const GM_SPEED_MIN_PERCENT = 10;
 const GM_SPEED_MAX_PERCENT = 1000;
+const GM_ZOE = 0x0c;
+const GM_MOB_KILL = 0x14;
+const MAX_OBJECT_ID = 0xffffffff;
+const GM_COUNT_MASK = 0xff;
 
 /*
 ================
@@ -51,6 +55,19 @@ record +0xA0).
 export interface GmMonsterReference {
 	readonly refObjId: number;
 	readonly monsterType: number;
+}
+
+/*
+================
+GmRequestContext
+
+The worker owns the reference catalog and current selection. The composer
+uses those authorities rather than inventing a target when none is selected.
+================
+*/
+export interface GmRequestContext {
+	readonly monster?: ( codename: string ) => GmMonsterReference | undefined;
+	readonly targetGid?: number;
 }
 
 /*
@@ -173,9 +190,10 @@ export function gmRequest(
 	line: string,
 	items: ReadonlyMap<string, GmItemReference> = new Map(),
 	heading = 0,
-	monster: ( codename: string ) => GmMonsterReference | undefined = () => undefined
+	context: GmRequestContext = {}
 ): WireFrame | null {
 	const tokens = line.trim().split( /\s+/ ), name = tokens[0], arg = tokens[1] ?? "";
+	const targetGid = context.targetGid ?? 0;
 	// Retail 50B303: WP sends u8 16, u16 region, float32 XYZ, u16 heading.
 	// Coordinate convenience uses that authority instead of 50BEE0's local warp.
 	if ( name === "/warp" ) {
@@ -209,7 +227,7 @@ export function gmRequest(
 	// u8 count (low byte, 1..255), u8 type. Without a type token 50A4A6 sends the
 	// record's +0xA0 byte; an unrecognized token leaves 0 (50A49F).
 	if ( name === "/LOADMONSTER" && (tokens.length === 3 || tokens.length === 4) ) {
-		const ref = monster( arg );
+		const ref = context.monster?.( arg );
 		if ( !ref ) return null;
 		const parsed = (Number.parseInt( tokens[2]!, 10 ) || 0) & 255, count = parsed <= 1 ? 1 : parsed;
 		const word = tokens[3]?.toUpperCase();
@@ -226,6 +244,28 @@ export function gmRequest(
 		new DataView( payload.buffer ).setUint32( 1, ref.refObjId, true );
 		return { opcode: OP_GM_COMMAND, payload };
 	}
+	// 50A5A8..50A6DF /ZOE codename count: subcmd 12, u32 ref, u8 count (the
+	// parsed low byte; 0 and 1 become 1 and 255 stays 255, 50A6AB..50A6CD).
+	// The server loads the monsters and kills them for rewards.
+	if ( name?.toUpperCase() === "/ZOE" && tokens.length === 3 ) {
+		const ref = context.monster?.( arg );
+		if ( !ref ) return null;
+		const parsed = (Number.parseInt( tokens[2]!, 10 ) || 0) & GM_COUNT_MASK, count = parsed <= 1 ? 1 : parsed;
+		const payload = Uint8Array.of( GM_ZOE, 0, 0, 0, 0, count );
+		new DataView( payload.buffer ).setUint32( 1, ref.refObjId, true );
+		return { opcode: OP_GM_COMMAND, payload };
+	}
+	// 50B645..50B77E /MOBKILL 0|1: subcmd 20, u32 selected object, u16 mode.
+	// The native arm sends nothing without a selected target; the worker
+	// supplies the target the player clicked.
+	if ( name?.toUpperCase() === "/MOBKILL" && tokens.length === 2 && /^[01]$/.test( arg ) ) {
+		if ( !Number.isInteger( targetGid ) || targetGid <= 0 || targetGid > MAX_OBJECT_ID ) return null;
+		const payload = new Uint8Array( 7 ), view = new DataView( payload.buffer );
+		payload[0] = GM_MOB_KILL;
+		view.setUint32( 1, targetGid, true );
+		view.setUint16( 5, Number( arg ), true );
+		return { opcode: OP_GM_COMMAND, payload };
+	}
 	// Any case: the command is port-only, and players type it as /setspeed.
 	if ( name?.toUpperCase() === "/SETSPEED" ) {
 		if ( tokens.length > 2 || (tokens.length === 2 && !/^[0-9]+$/.test( tokens[1]! )) ) return null;
@@ -239,7 +279,7 @@ export function gmRequest(
 		if ( tokens.length !== 3 || !/^[0-9]+$/.test( tokens[2]! ) ) return null;
 		const amount = Number( tokens[2] ), bytes = new TextEncoder().encode( arg );
 		if ( amount < 1 || amount > MAX_SILK_GRANT ) return null;
-		if ( !bytes.length || bytes.length >= MAX_GM_NAME_BYTES || arg.includes( " " ) ) {
+		if ( !bytes.length || bytes.length >= MAX_GM_NAME_BYTES || arg.includes( "\0" ) ) {
 			throw Error( "Invalid GM name" );
 		}
 		const payload = new Uint8Array( 3 + bytes.length + 4 ), view = new DataView( payload.buffer );

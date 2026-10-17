@@ -15,6 +15,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+/*
+================
+load
+================
+*/
 async function load( path ) {
 	return import( sourceFileUrl( "src/engine/" + path ).href );
 }
@@ -185,7 +190,7 @@ test("GM authority is independent of PC-room eligibility and resets", () => {
 test("LOADMONSTER sends the native subcmd 6 frame with clamped count and resolved type", () => {
 	const refs = new Map( [ [ "MOB_CH_MANGNYANG", { refObjId: 0x1234, monsterType: 1 } ] ] );
 	const monster = codename => refs.get( codename );
-	const frame = line => [ ...gmRequest( line, new Map(), 0, monster )?.payload ?? [] ];
+	const frame = line => [ ...gmRequest( line, new Map(), 0, { monster } )?.payload ?? [] ];
 	// 50A53E..50A57E: subcmd 6, u32 refObjID LE, u8 count, u8 type.
 	assert.deepEqual( frame( "/LOADMONSTER MOB_CH_MANGNYANG 20 GIANT" ), [ 6, 0x34, 0x12, 0, 0, 20, 4 ] );
 	assert.deepEqual( frame( "/LOADMONSTER MOB_CH_MANGNYANG 20 champ" ), [ 6, 0x34, 0x12, 0, 0, 20, 1 ] );
@@ -197,6 +202,33 @@ test("LOADMONSTER sends the native subcmd 6 frame with clamped count and resolve
 	assert.equal( frame( "/LOADMONSTER MOB_CH_MANGNYANG 0" )[5], 1 );
 	assert.equal( frame( "/LOADMONSTER MOB_CH_MANGNYANG 257" )[5], 1 );
 	assert.equal( frame( "/LOADMONSTER MOB_CH_MANGNYANG 300" )[5], 44 );
-	assert.equal( gmRequest( "/LOADMONSTER MOB_UNKNOWN 5", new Map(), 0, monster ), null );
-	assert.equal( gmRequest( "/LOADMONSTER MOB_CH_MANGNYANG", new Map(), 0, monster ), null );
+	assert.equal( gmRequest( "/LOADMONSTER MOB_UNKNOWN 5", new Map(), 0, { monster } ), null );
+	assert.equal( gmRequest( "/LOADMONSTER MOB_CH_MANGNYANG", new Map(), 0, { monster } ), null );
+});
+
+test("ZOE and MOBKILL compose the native subcmd 12 and 20 frames", () => {
+	const refs = new Map( [ [ "MOB_CH_MANGNYANG", { refObjId: 0x1234, monsterType: 0 } ] ] );
+	const monster = codename => refs.get( codename );
+	const payload = (
+		line,
+		targetGid = 0
+	) => [ ...gmRequest( line, new Map(), 0, { monster, targetGid } )?.payload ?? [] ];
+	// 50A5A8..50A6DF: subcmd 12, u32 refObjID LE, u8 count (0/1 -> 1, 255 stays).
+	assert.deepEqual( payload( "/ZOE MOB_CH_MANGNYANG 20" ), [ 12, 0x34, 0x12, 0, 0, 20 ] );
+	assert.equal( payload( "/ZOE MOB_CH_MANGNYANG 0" )[5], 1 );
+	assert.equal( payload( "/ZOE MOB_CH_MANGNYANG 255" )[5], 255 );
+	assert.equal( payload( "/ZOE MOB_CH_MANGNYANG 300" )[5], 44 );
+	assert.equal( gmRequest( "/ZOE MOB_UNKNOWN 5", new Map(), 0, { monster } ), null );
+	assert.equal( gmRequest( "/ZOE MOB_CH_MANGNYANG", new Map(), 0, { monster } ), null );
+	// 50B645..50B77E: subcmd 20, u32 selected target, u16 mode; no target, no frame.
+	assert.deepEqual( payload( "/MOBKILL 0", 0x12345678 ), [ 20, 0x78, 0x56, 0x34, 0x12, 0, 0 ] );
+	assert.deepEqual( payload( "/MOBKILL 1", 0x12345678 ), [ 20, 0x78, 0x56, 0x34, 0x12, 1, 0 ] );
+	assert.equal( gmRequest( "/MOBKILL 0", new Map(), 0, { monster } ), null );
+	assert.equal( gmRequest( "/MOBKILL 2", new Map(), 0, { monster, targetGid: 1 } ), null );
+	assert.equal( gmRequest( "/MOBKILL", new Map(), 0, { monster, targetGid: 1 } ), null );
+	assert.deepEqual( payload( "/zoe MOB_CH_MANGNYANG 2" ), [ 12, 0x34, 0x12, 0, 0, 2 ] );
+	assert.deepEqual( payload( "/mobkill 1", 0x12345678 ), [ 20, 0x78, 0x56, 0x34, 0x12, 1, 0 ] );
+	for ( const targetGid of [ 0, -1, 1.5, NaN, Infinity, 0x100000000 ] ) {
+		assert.equal( gmRequest( "/MOBKILL 0", new Map(), 0, { targetGid } ), null );
+	}
 });

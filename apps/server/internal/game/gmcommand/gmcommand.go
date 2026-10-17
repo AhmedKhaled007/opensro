@@ -96,6 +96,26 @@ func HandleGmCommand(deps Dependencies, presence PresenceView, divisionID string
 			}
 		}
 		return Outcome{Ack: EncodeRequestFailure(request), Refusal: "monster-load-refused"}
+	case SubZoe:
+		if len(status) > 0 {
+			if owner, ok := status[0].(interface {
+				KillGMZoe(string, string, uint32, uint8) bool
+			}); ok && owner.KillGMZoe(divisionID, sender.Name, request.RefObjID, request.Amount) {
+				return Outcome{Ack: []byte{AckResultOK, SubZoe}}
+			}
+		}
+		return Outcome{Ack: EncodeRequestFailure(request), Refusal: "zoe-refused"}
+	case SubMobKill:
+		// sub_751ec0 selects case 5 (no tail) for result 1 and the generic
+		// system message for result 2, like every other relayed command.
+		if len(status) > 0 {
+			if owner, ok := status[0].(interface {
+				KillGMMonster(string, string, uint32, bool) bool
+			}); ok && owner.KillGMMonster(divisionID, sender.Name, request.TargetGID, request.MobKillMode == 0) {
+				return Outcome{Ack: []byte{AckResultOK, SubMobKill}}
+			}
+		}
+		return Outcome{Ack: EncodeRequestFailure(request), Refusal: "monster-kill-refused"}
 	case SubInvisible, SubInvincible:
 		if len(payload) != 1 || len(status) == 0 || status[0] == nil {
 			return Outcome{Ack: EncodeRequestFailure(request), Refusal: "body-status-unavailable"}

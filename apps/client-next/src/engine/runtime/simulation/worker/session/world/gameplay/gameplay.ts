@@ -1817,7 +1817,12 @@ state here before a command can claim a native wire conversation.
 
 			if ( command.kind === "gm-command" ) {
 				if ( !eligibility.gm || !localGid ) return null;
-				const frame = gmRequest( command.line, gmItems, local?.heading ?? 0, worldReferences.monster );
+				const frame = gmRequest(
+					command.line,
+					gmItems,
+					local?.heading ?? 0,
+					{ monster: worldReferences.monster, targetGid: targeting.selectionIntent() }
+				);
 				return frame ? sendFrame( frame ) : null;
 			}
 			if ( command.kind === "rebirth" ) {

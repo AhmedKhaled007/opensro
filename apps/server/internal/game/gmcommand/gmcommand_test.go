@@ -275,3 +275,121 @@ func TestLoadMonsterWireAndDispatch(t *testing.T) {
 		t.Fatal("a non-GM reached the monster owner")
 	}
 }
+
+// killOwner records the action-owned /MOBKILL call.
+type killOwner struct {
+	monsterOwner
+	kill    bool
+	gid     uint32
+	rewards bool
+	calls   int
+}
+
+func (o *killOwner) KillGMMonster(_, _ string, gid uint32, rewards bool) bool {
+	o.calls++
+	o.gid, o.rewards = gid, rewards
+	return o.kill
+}
+
+/*
+================
+TestMobKillWireAndDispatch
+
+The client composer (50B754..50B77E) sends subcmd 0x14, u32 selected target
+id and u16 mode, and only for a mode argument of exactly 0 or 1. Mode 0 asks
+for rewards, mode 1 for none; the owner's verdict picks the result-1 or
+result-2 ack, and a non-GM never reaches the owner.
+================
+*/
+func TestMobKillWireAndDispatch(t *testing.T) {
+	frame := []byte{SubMobKill, 0x78, 0x56, 0x34, 0x12, 0, 0}
+	request, err := DecodeGmCommand(frame)
+	if err != nil || request.TargetGID != 0x12345678 || request.MobKillMode != 0 {
+		t.Fatalf("decode = %+v, %v", request, err)
+	}
+	for _, bad := range [][]byte{frame[:6], append(append([]byte{}, frame...), 0), {SubMobKill, 1, 0, 0, 0, 2, 0}} {
+		if _, err := DecodeGmCommand(bad); err == nil {
+			t.Fatalf("a malformed MOBKILL % X decoded", bad)
+		}
+	}
+	gm := gmChar("Gm", true, 0x655e)
+	owner := &killOwner{kill: true}
+	out := HandleGmCommand(testDeps(gm), &stubPresence{}, testDivision, gm, frame, owner)
+	if !bytes.Equal(out.Ack, []byte{AckResultOK, SubMobKill}) || owner.calls != 1 || owner.gid != 0x12345678 || !owner.rewards {
+		t.Fatalf("mode 0: ack %x, owner %+v", out.Ack, owner)
+	}
+	frame[5] = 1
+	HandleGmCommand(testDeps(gm), &stubPresence{}, testDivision, gm, frame, owner)
+	if owner.calls != 2 || owner.rewards {
+		t.Fatalf("mode 1 asked for rewards: %+v", owner)
+	}
+	owner.kill = false
+	out = HandleGmCommand(testDeps(gm), &stubPresence{}, testDivision, gm, frame, owner)
+	if !bytes.Equal(out.Ack, []byte{AckResultFail, SubMobKill}) || out.Refusal == "" {
+		t.Fatalf("refused kill: ack %x refusal %q", out.Ack, out.Refusal)
+	}
+	out = HandleGmCommand(testDeps(gm), &stubPresence{}, testDivision, gm, frame)
+	if !bytes.Equal(out.Ack, []byte{AckResultFail, SubMobKill}) {
+		t.Fatalf("no owner: ack %x", out.Ack)
+	}
+	player := gmChar("Player", false, 0x655e)
+	owner.calls = 0
+	out = HandleGmCommand(testDeps(player), &stubPresence{}, testDivision, player, frame, owner)
+	if out.Ack != nil || owner.calls != 0 {
+		t.Fatal("a non-GM reached the kill owner")
+	}
+}
+
+// zoeOwner records the action-owned /ZOE call.
+type zoeOwner struct {
+	monsterOwner
+	admit    bool
+	ref      uint32
+	count    uint8
+	zoeCalls int
+}
+
+func (o *zoeOwner) KillGMZoe(_, _ string, ref uint32, count uint8) bool {
+	o.zoeCalls++
+	o.ref, o.count = ref, count
+	return o.admit
+}
+
+/*
+================
+TestZoeWireAndDispatch
+
+The client composer (50A6DD..50A707) sends subcmd 0x0C, u32 monster
+refObjID and u8 count; the owner's verdict picks the result-1 or result-2
+ack, and a non-GM never reaches the owner.
+================
+*/
+func TestZoeWireAndDispatch(t *testing.T) {
+	frame := []byte{SubZoe, 0x8D, 0x07, 0, 0, 3}
+	request, err := DecodeGmCommand(frame)
+	if err != nil || request.RefObjID != 1933 || request.Amount != 3 {
+		t.Fatalf("decode = %+v, %v", request, err)
+	}
+	for _, bad := range [][]byte{frame[:5], append(append([]byte{}, frame...), 0)} {
+		if _, err := DecodeGmCommand(bad); err == nil {
+			t.Fatalf("a %d-byte ZOE decoded", len(bad))
+		}
+	}
+	gm := gmChar("Gm", true, 0x655e)
+	owner := &zoeOwner{admit: true}
+	out := HandleGmCommand(testDeps(gm), &stubPresence{}, testDivision, gm, frame, owner)
+	if !bytes.Equal(out.Ack, []byte{AckResultOK, SubZoe}) || owner.zoeCalls != 1 || owner.ref != 1933 || owner.count != 3 {
+		t.Fatalf("admitted zoe: ack %x owner %+v", out.Ack, owner)
+	}
+	owner.admit = false
+	out = HandleGmCommand(testDeps(gm), &stubPresence{}, testDivision, gm, frame, owner)
+	if !bytes.Equal(out.Ack, []byte{AckResultFail, SubZoe}) || out.Refusal == "" {
+		t.Fatalf("refused zoe: ack %x refusal %q", out.Ack, out.Refusal)
+	}
+	player := gmChar("Player", false, 0x655e)
+	owner.zoeCalls = 0
+	out = HandleGmCommand(testDeps(player), &stubPresence{}, testDivision, player, frame, owner)
+	if out.Ack != nil || owner.zoeCalls != 0 {
+		t.Fatal("a non-GM reached the zoe owner")
+	}
+}

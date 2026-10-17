@@ -1,3 +1,13 @@
+/*
+===========================================================================
+
+register.go - the authenticated GM command hub boundary and diagnostics
+
+Privilege denials retain the rate-limited audit path. Detailed diagnostic
+payloads are bounded and are emitted only for privileged requests.
+
+===========================================================================
+*/
 package gmcommand
 
 import (
@@ -8,11 +18,18 @@ import (
 	"opensro.online/server/internal/transport"
 )
 
+const gmPayloadLogBytes = 64
+
 // Register wires the GM command lane's 0x75B6 handler onto the hub. Called
 // from wiring.go with the SAME deps/presence instances every other lane
 // captures, after the store collaborators are assigned. 0x75B6 registers
 // exactly once and no other lane touches 0x75B6/0xB5B6 (survey date
 // 2026-07-29).
+/*
+================
+Register
+================
+*/
 func Register(hub *transport.Hub, deps Dependencies, presence PresenceView, status ...BodyStatusCommands) {
 	hub.Handle(OpGmCommand, gmCommandHubHandler(deps, presence, status...))
 }
@@ -22,6 +39,11 @@ func Register(hub *transport.Hub, deps Dependencies, presence PresenceView, stat
 // name), gate on GMPrivilege inside HandleGmCommand, and answer the sender
 // with the 0xB5B6 ack. A nil Ack stays silent on the wire (an unprivileged
 // sender, a decode refusal, or a bound-character miss).
+/*
+================
+gmCommandHubHandler
+================
+*/
 func gmCommandHubHandler(deps Dependencies, presence PresenceView, status ...BodyStatusCommands) transport.HandlerFunc {
 	audit := newPrivilegeAudit()
 	return func(s *transport.Session, opcode uint16, payload []byte) {
@@ -31,6 +53,7 @@ func gmCommandHubHandler(deps Dependencies, presence PresenceView, status ...Bod
 			return
 		}
 		outcome := HandleGmCommand(deps, presence, divisionID, character, payload, status...)
+		logGMRequest(opcode, character.Name, payload, outcome)
 		if outcome.PrivilegeDenied {
 			audit.deny(divisionID, character.Name, s.ID, len(payload), time.Now())
 		} else if outcome.Refusal != "" {
@@ -40,4 +63,19 @@ func gmCommandHubHandler(deps Dependencies, presence PresenceView, status ...Bod
 			_ = s.Send(OpGmCommandAck, outcome.Ack)
 		}
 	}
+}
+
+/*
+================
+logGMRequest
+
+Never bypass the privilege audit's flood limit for a denied sender. A GM's
+bounded preview keeps the discriminator and ordinary argument bytes visible.
+================
+*/
+func logGMRequest(opcode uint16, name string, payload []byte, outcome Outcome) {
+	if outcome.PrivilegeDenied {
+		return
+	}
+	log.Infof("gmcommand: 0x%04X from %s payload=% X bytes=%d ack=%v refusal=%q", opcode, name, payload[:min(len(payload), gmPayloadLogBytes)], len(payload), outcome.Ack, outcome.Refusal)
 }

@@ -51,6 +51,14 @@ const (
 	// u8 count, u8 type (CHAMP 1, GIANT 4, NORMAL 0, else the record's +0xA0).
 	SubLoadMonster uint8 = 0x06
 	SubWarp        uint8 = 0x10
+	// SubMobKill: /MOBKILL (@0x0050b754 var_4bc = 0x14, three builder calls
+	// of 1, 4 and 2 bytes) - subcmd, u32 selected target id, u16 mode. The
+	// client sends it only for a mode argument of exactly 0 or 1.
+	SubMobKill uint8 = 0x14
+	// SubZoe: /ZOE (@0x0050a6dd var_4bc = 0x0C, three builder calls of 1, 4
+	// and 1 bytes) - subcmd, u32 monster refObjID, u8 count (client clamps
+	// 1..255). The server loads the monsters and kills them for rewards.
+	SubZoe uint8 = 0x0C
 	// SubSetTime: /SETTIME hour - subcmd + u8 hour 0..23 (509CF0 clamps;
 	// 51DE90 case 8 relays it to the shard manager as SetGameTime).
 	SubSetTime uint8 = 0x0A
@@ -107,6 +115,12 @@ type Request struct {
 	Destination wire.Position
 	// MonsterType is /LOADMONSTER's requested type byte (server 520A89 &0xF).
 	MonsterType uint8
+	// TargetGID is /MOBKILL's selected monster object id.
+	TargetGID uint32
+	// MobKillMode is /MOBKILL's mode word: 0 kills with EXP/SP and drops, 1
+	// kills without them. INFERENCE: community GM guides for the V-Sro client
+	// describe the two modes this way; no server binary was read.
+	MobKillMode uint16
 	// Name is the decoded ANSI argument for the name-payload subcommands
 	// (FINDUSER/LIENAME/REALNAME/...). Empty for other subcommands.
 	Name string
@@ -196,6 +210,33 @@ func DecodeGmCommand(payload []byte) (Request, error) {
 			return Request{}, err
 		}
 		request.MonsterType, err = reader.U8()
+		return request, err
+	}
+	if subcmd == SubMobKill {
+		// 50B754..50B77E: subcmd, u32 target id, u16 mode.
+		if len(payload) != 7 {
+			return Request{}, fmt.Errorf("gmcommand: MOBKILL requires seven bytes")
+		}
+		if request.TargetGID, err = reader.U32(); err != nil {
+			return Request{}, err
+		}
+		if request.MobKillMode, err = reader.U16(); err != nil {
+			return Request{}, err
+		}
+		if request.MobKillMode > 1 {
+			return Request{}, fmt.Errorf("gmcommand: MOBKILL mode %d is not 0 or 1", request.MobKillMode)
+		}
+		return request, nil
+	}
+	if subcmd == SubZoe {
+		// 50A6DD..50A707: subcmd, u32 refObjID, u8 count.
+		if len(payload) != 6 {
+			return Request{}, fmt.Errorf("gmcommand: ZOE requires six bytes")
+		}
+		if request.RefObjID, err = reader.U32(); err != nil {
+			return Request{}, err
+		}
+		request.Amount, err = reader.U8()
 		return request, err
 	}
 	if !nameSubcommands[subcmd] {
