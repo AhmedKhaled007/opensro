@@ -269,7 +269,9 @@ export function createActorMotion( owner: ActorOwner ) {
 				state.navigationHold = undefined;
 			}
 			if ( state.navigationHold ) {
-				renderPose = state.navigationHold.pose;
+				// The hold freezes XYZ; the yaw keeps tracking the cast
+				// target (8DC440 castFacing), as renderPose already does.
+				renderPose = { ...state.navigationHold.pose, angle: renderPose.angle };
 				moving = false;
 			}
 			const activePosture = presentationState.idleStates.get( entity.gid )?.posture;
@@ -337,15 +339,31 @@ export function createActorMotion( owner: ActorOwner ) {
 				};
 			}
 			state.actionMode = entity.movementMode;
+			// A cast that stops the walk leaves state 9. When the stop and
+			// the cast arrive in one server burst (0xB2F5 with 0xB245), this
+			// frame already reports moving=false, so requiring
+			// requestedMoving missed every real cast and the body then
+			// glided across the correction under its cast animation
+			// (BR-261015-0827-9B2B). The hold pose is the last drawn one:
+			// this frame's pose() has already spent the correction. A cast
+			// record alone is not enough: gameplay.casts retains completed
+			// (phase 3, projectile still flying) and cancelled casts, and
+			// latching a hold for those would freeze an ordinary walk stop.
+			const activeCast = !!cast && cast.cancelledAtMs === undefined &&
+				(actionLayersByActor.get( entity.gid )?.length ?? 0) > 0;
 			if (
-				requestedMoving && refresh.effects.some( e => e.kind === "leave" && e.state === 9 ) &&
+				(requestedMoving || waiting || activeCast) &&
+				refresh.effects.some( e => e.kind === "leave" && e.state === 9 ) &&
 				!refresh.navigation
 			) {
 				state.navigationHold = displaced ? undefined : {
 					revision: movementRevision,
-					pose: renderPose,
+					pose: requestedMoving ? renderPose : state.lastDrawnPose ?? renderPose,
 					mode: entity.movementMode
 				};
+				if ( state.navigationHold ) {
+					renderPose = { ...state.navigationHold.pose, angle: renderPose.angle };
+				}
 				moving = false;
 			}
 			// 8EADF0 tries the selected item override before the ordinary
@@ -820,6 +838,7 @@ export function createActorMotion( owner: ActorOwner ) {
 					"stand";
 			state.modifierResource = resource;
 			state.modifierLayers = layers;
+			state.lastDrawnPose = { ...renderPose };
 			next.set( entity.gid, {
 				shadowSize: !entity.groundItem ? published.shadowSizes.get( entity.refObjId ) : undefined,
 				modelAnimation: resource.modifierBindings?.length ?

@@ -43,7 +43,7 @@ import type { CharacterRecord } from "@/engine/contracts/session";
 import type { AssetOwner } from "@/engine/contracts/assets";
 import type { RenderFrameProbe, Renderer } from "@/engine/contracts/runtime";
 import type { EntityState } from "@/engine/contracts/world";
-import type { GameplayState } from "@/engine/contracts/gameplay";
+import type { GameplayState, Pose } from "@/engine/contracts/gameplay";
 import type { CharacterActor } from "@/engine/contracts/character";
 import { createPresentationCatalog } from "./presentation-catalog";
 import { createActorPresentation } from "./actor-presentation";
@@ -527,6 +527,45 @@ export function createCharacterPresentation(
 		);
 		gameplay = actionFrame.gameplay;
 		const { actionLayersByActor, waitingActors, triggers, soundContext } = actionFrame;
+		// Effects run before actor-motion takes this frame's navigation
+		// hold, so they read the hold from the same per-actor state: the
+		// standing hold, or on the burst frame (walk stop and cast in one
+		// server burst) the last drawn pose actor-motion is about to hold.
+		// A hold actor-motion releases this frame (new walk revision,
+		// displacement, death, mount) anchors nothing here either.
+		const heldPose = ( gid: number ) => {
+			const state = states.get( gid ), entity = entitiesByGid.get( gid ), local = localMover( gid );
+			const movementRevision = (local ? gameplay?.movementRevision : entity?.movementRevision) ?? 0;
+			const displaced = (local ? gameplay?.movementPath : entity?.movementPath)?.displacement === true;
+			const dead = (entity?.appearanceState?.[0] !== undefined ?
+				entity.appearanceState[0] === 2 :
+				vitalsByGid.get( gid )?.hp === 0) ||
+				!!health?.dead( gid );
+			if ( state?.navigationHold ) {
+				return state.navigationHold.revision === movementRevision && !displaced && !dead &&
+						!entity?.mountedOn ?
+					state.navigationHold.pose :
+					undefined;
+			}
+			const cast = castByActor.get( gid );
+			if ( !state?.lastDrawnPose || !cast || !entity || cast.cancelledAtMs !== undefined ) return undefined;
+			if ( dead || entity.mountedOn || ((state.actionMask ?? 0) & 0x200) === 0 ) return undefined;
+			const moving = local ? gameplay?.moving : entity.moving;
+			if ( moving || displaced || !state.actionInput?.requestedMoving ) return undefined;
+			return waitingActors.has( gid ) || (actionLayersByActor.get( gid )?.length ?? 0) > 0 ?
+				state.lastDrawnPose :
+				undefined;
+		};
+		const heldPoses = new Map<number, Pose>();
+		for ( const entity of entities ) {
+			const held = heldPose( entity.gid );
+			if ( held ) heldPoses.set( entity.gid, held );
+		}
+		for ( const gid of states.keys() ) {
+			if ( heldPoses.has( gid ) ) continue;
+			const held = heldPose( gid );
+			if ( held ) heldPoses.set( gid, held );
+		}
 		const { hitByActor, effectActors, pendingDeaths } = presentationEvents.step(
 			{
 				entities,
@@ -538,6 +577,7 @@ export function createCharacterPresentation(
 				combatStanceEnds: presentationState.combatStanceEnds,
 				triggers,
 				samples,
+				heldPoses,
 				localMover,
 				logicalPose,
 				appearanceRef,
