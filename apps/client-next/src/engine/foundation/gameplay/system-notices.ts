@@ -9,6 +9,7 @@ the shard's job-kill and drop/plus notices (0x3667), and the command restriction
 
 ===========================================================================
 */
+import { decodeNoticeLinks } from "./notice-links";
 
 /*
 ================
@@ -34,6 +35,7 @@ export interface SystemNotice {
 	readonly bannerOnly?: true;
 	readonly jobKill?: true;
 	readonly dropPlus?: true;
+	readonly plusSeven?: true;
 }
 /*
 ================
@@ -66,10 +68,18 @@ export function fortressNotice( opcode: number, p: Uint8Array ): SystemNotice | 
 // channel 7 unless the Experimental "Job kill notices" row is off.
 export const JOB_KILL_NOTICE_CHANNEL = 0x80;
 
-// Port-only, not native: the shard's seal-drop and +8..+11 announcement
-// channel (server wire.DropPlusNoticeChannel), shown as channel 7 unless the
-// Experimental "Drop & plus notices" row is off.
+// Port-only, not native: the shard's seal-drop and plus announcement
+// channel (server wire.DropPlusNoticeChannel), shown as channel 7 unless
+// one of the notice rows is off. The +7 announcements (owner decision
+// 2026-10-19) share this channel as their own bucket; announcedPlusSeven
+// picks which Experimental row gates a frame.
 export const DROP_PLUS_NOTICE_CHANNEL = 0x81;
+
+// The announced item's plus rides its encoded body at a fixed byte (the
+// server's ItemBody.Encode header, ItemBodySize 18). A shorter or absent
+// body names no plus.
+const ITEM_BODY_HEADER_BYTES = 18;
+const ITEM_BODY_PLUS_BYTE = 4;
 
 /*
 ================
@@ -88,7 +98,7 @@ serverNotification
 
 753A6F -> 752ABD -> 67A140/6B3180: the native type-7 server notification,
 and the port-only job-kill and drop/plus channels laid out the same way
-(flagged jobKill or dropPlus, so the gameplay owner can hide them). The chat owner separately retains the
+(flagged jobKill, dropPlus or plusSeven, so the gameplay owner can hide them). The chat owner separately retains the
 (Notify): line in the main log.
 ================
 */
@@ -105,8 +115,28 @@ export function serverNotification( opcode: number, p: Uint8Array ): SystemNotic
 	const text = new TextDecoder( "utf-16le", { fatal: true } ).decode( p.subarray( 3, 3 + 2 * n ) );
 	const notice: SystemNotice = { key: "", text, value: 0, notificationBanner: true, bannerOnly: true };
 	if ( p[0] === JOB_KILL_NOTICE_CHANNEL ) return { ...notice, jobKill: true };
-	if ( p[0] === DROP_PLUS_NOTICE_CHANNEL ) return { ...notice, dropPlus: true };
+	if ( p[0] === DROP_PLUS_NOTICE_CHANNEL ) {
+		return links && announcedPlusSeven( p, 3 + 2 * n ) ?
+			{ ...notice, plusSeven: true } :
+			{ ...notice, dropPlus: true };
+	}
 	return notice;
+}
+
+/*
+================
+announcedPlusSeven
+
+Whether a drop/plus frame announces an item at exactly +7, read off the
+linked item body's plus byte: the +7 bucket shares the drop/plus
+channel (no new wire channel, so every client keeps rendering it), and
+this byte alone picks its row. Seal drops (+0), plus of +8 and above,
+and frames without a readable body stay with dropPlus.
+================
+*/
+function announcedPlusSeven( p: Uint8Array, linksOffset: number ): boolean {
+	const body = decodeNoticeLinks( p, linksOffset )?.body;
+	return body !== undefined && body.length >= ITEM_BODY_HEADER_BYTES && body[ITEM_BODY_PLUS_BYTE] === 7;
 }
 
 /*
