@@ -232,7 +232,6 @@ apps/client-next/tests/browser/dungeon-water.test.mjs
 apps/client-next/tests/browser/effect-material.test.mjs
 apps/client-next/tests/browser/effect-plates.test.mjs
 apps/client-next/tests/browser/entity-material-clock.test.mjs
-apps/client-next/tests/browser/entry-consumers.test.mjs
 apps/client-next/tests/browser/equipment-overlays.test.mjs
 apps/client-next/tests/browser/flares.test.mjs
 apps/client-next/tests/browser/font-guide-regression.test.mjs

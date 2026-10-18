@@ -63,6 +63,15 @@ test("MAKEITEM resolves authored references and uses native low-byte clamping", 
 		0,
 		20
 	] );
+	// ChatInput_HandleGmCommand matches with CRT_wcsicmp (0x50A77A).
+	assert.deepEqual( [ ...gmRequest( "/makeitem ITEM_ETC_SPEED_UP_BASIC 20", rows ).payload ], [
+		7,
+		134,
+		94,
+		0,
+		0,
+		20
+	] );
 	assert.equal( gmRequest( "/MAKEITEM UNKNOWN 1", rows ), null );
 	assert.equal( gmRequest( "/MAKEITEM ITEM_ETC_SPEED_UP_BASIC", rows ), null );
 	assert.equal( gmRequest( "/MAKEITEM ITEM_ETC_SPEED_UP_BASIC 256", rows ).payload[5], 1 );
@@ -193,6 +202,8 @@ test("LOADMONSTER sends the native subcmd 6 frame with clamped count and resolve
 	const frame = line => [ ...gmRequest( line, new Map(), 0, { monster } )?.payload ?? [] ];
 	// 50A53E..50A57E: subcmd 6, u32 refObjID LE, u8 count, u8 type.
 	assert.deepEqual( frame( "/LOADMONSTER MOB_CH_MANGNYANG 20 GIANT" ), [ 6, 0x34, 0x12, 0, 0, 20, 4 ] );
+	// ChatInput_HandleGmCommand matches with CRT_wcsicmp (0x50A3D5).
+	assert.deepEqual( frame( "/loadmonster MOB_CH_MANGNYANG 20 GIANT" ), [ 6, 0x34, 0x12, 0, 0, 20, 4 ] );
 	assert.deepEqual( frame( "/LOADMONSTER MOB_CH_MANGNYANG 20 champ" ), [ 6, 0x34, 0x12, 0, 0, 20, 1 ] );
 	assert.deepEqual( frame( "/LOADMONSTER MOB_CH_MANGNYANG 20 NORMAL" ), [ 6, 0x34, 0x12, 0, 0, 20, 0 ] );
 	assert.deepEqual( frame( "/LOADMONSTER MOB_CH_MANGNYANG 20 OTHER" ), [ 6, 0x34, 0x12, 0, 0, 20, 0 ] );

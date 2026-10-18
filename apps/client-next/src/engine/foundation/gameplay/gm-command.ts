@@ -402,7 +402,8 @@ export function gmRequest(
 		v.setUint16( 15, heading, true );
 		return { opcode: OP_GM_COMMAND, payload };
 	}
-	if ( name === "/MAKEITEM" && tokens.length === 3 ) {
+	// ChatInput_HandleGmCommand matches with CRT_wcsicmp (0x50A77A).
+	if ( name?.toUpperCase() === "/MAKEITEM" && tokens.length === 3 ) {
 		const ref = items.get( arg );
 		if ( !ref ) return null;
 		// 50A838 reads the parsed integer's low byte BEFORE clamping.
@@ -415,7 +416,8 @@ export function gmRequest(
 	// 50A3D3 /LOADMONSTER codename count [CHAMP|GIANT|NORMAL]: subcmd 6, u32 ref,
 	// u8 count (low byte, 1..255), u8 type. Without a type token 50A4A6 sends the
 	// record's +0xA0 byte; an unrecognized token leaves 0 (50A49F).
-	if ( name === "/LOADMONSTER" && (tokens.length === 3 || tokens.length === 4) ) {
+	// ChatInput_HandleGmCommand matches with CRT_wcsicmp (0x50A3D5).
+	if ( name?.toUpperCase() === "/LOADMONSTER" && (tokens.length === 3 || tokens.length === 4) ) {
 		const ref = context.monster?.( arg );
 		if ( !ref ) return null;
 		const parsed = (Number.parseInt( tokens[2]!, 10 ) || 0) & 255, count = parsed <= 1 ? 1 : parsed;

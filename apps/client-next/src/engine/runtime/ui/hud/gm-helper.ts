@@ -3,12 +3,14 @@
 
 gm-helper.ts - the GM console's inline codename list
 
-DELIBERATE ADDITION, NOT NATIVE: retail's console (Console_OnInputKey,
-50F260) takes /MAKEITEM and /LOADMONSTER only from what the GM types. This
-owner filters the published codename catalogues as the line changes, keeps
-the highlighted row, and turns Tab or Enter into a completed command. The
-console keeps its native 600x112 panel otherwise; a catalogue grows it so
-the list shows the same rows the native composer accepts.
+DELIBERATE ADDITION, NOT NATIVE: the native console's Console_OnInputKey
+(0x512050) forwards to ChatInput_HandleGmCommand (0x509CF0), and its F1/F2
+search popup (CIFConsole_OnKeyDown 0x50EBC0 -> GlobalDataManager_SearchCatalogForConsole
+0x7F0610) lists characters, items, quests and skills. This owner adds the
+GM-only catalogue that filters the published codenames and completes
+/MAKEITEM and /LOADMONSTER. The console keeps its native 600x112 panel
+otherwise; a catalogue grows it so the list shows the same rows the native
+composer accepts.
 
 ===========================================================================
 */
@@ -93,6 +95,10 @@ export function createGmHelper() {
 	// Port-only: F3 opens a catalogue without typing a slash command. The
 	// prompt's text then filters that catalogue; Escape or a second F3 closes it.
 	let browse: GmHelperTab | null = null;
+	// The tab currently drawn. It differs from browse when a typed
+	// /MAKEITEM or /LOADMONSTER chooses the catalogue; clearing the line then
+	// returns to the F3 browse tab instead of leaving the panel stuck open.
+	let displayTab: GmHelperTab = "items";
 	let query = "", dismissed = "", lastLine = "", lastVisible = GM_HELPER_ROWS;
 	let matches: readonly GmHelperRow[] = [], selected = 0, first = 0, visible = GM_HELPER_ROWS;
 	let items: readonly GmHelperRow[] = [], monsters: readonly GmHelperRow[] = [], uniques: readonly GmHelperRow[] = [];
@@ -192,9 +198,12 @@ export function createGmHelper() {
 	================
 	*/
 	function commandFor( line: string ): { command: GmHelperCommand; query: string; } | null {
+		// ChatInput_HandleGmCommand matches these with CRT_wcsicmp
+		// (0x50A3D5 / 0x50A77A), so /makeitem and /loadmonster are valid.
+		const upper = line.toUpperCase();
 		for ( const name of GM_HELPER_COMMANDS ) {
-			if ( line === name ) return { command: name, query: "" };
-			if ( !line.startsWith( name + " " ) ) continue;
+			if ( upper === name ) return { command: name, query: "" };
+			if ( !upper.startsWith( name + " " ) ) continue;
 			const rest = line.slice( name.length + 1 );
 			if ( /\s/.test( rest ) ) return null;
 			return { command: name, query: rest };
@@ -255,6 +264,7 @@ export function createGmHelper() {
 		*/
 		open( tab: GmHelperTab = "items" ) {
 			browse = tab;
+			displayTab = tab;
 			dismissed = "";
 			lastLine = "\0";
 			lastVisible = -1;
@@ -269,6 +279,7 @@ export function createGmHelper() {
 		*/
 		selectTab( tab: GmHelperTab ) {
 			browse = tab;
+			displayTab = tab;
 			dismissed = "";
 			lastLine = "\0";
 			deactivate();
@@ -286,6 +297,7 @@ export function createGmHelper() {
 			const index = GM_HELPER_TABS.indexOf( current );
 			const next = GM_HELPER_TABS[(index + delta + GM_HELPER_TABS.length) % GM_HELPER_TABS.length]!;
 			browse = next;
+			displayTab = next;
 			dismissed = "";
 			lastLine = "\0";
 			deactivate();
@@ -296,7 +308,7 @@ export function createGmHelper() {
 		================
 		*/
 		tab(): GmHelperTab {
-			return browse ?? "items";
+			return displayTab;
 		},
 		/*
 		================
@@ -371,7 +383,7 @@ export function createGmHelper() {
 				deactivate();
 				return state();
 			}
-			browse = tab;
+			displayTab = tab;
 			const needle = text.toLowerCase();
 			const source = sourceFor( tab );
 			const found = needle ?
@@ -462,10 +474,11 @@ export function createGmHelper() {
 			// Tab leaves the codename and a trailing space for the amount. If
 			// the GM presses Enter there, add the composer's default amount.
 			// A second word (amount, count or type) is left exactly as typed.
-			const named = /^\/(MAKEITEM|LOADMONSTER) (\S+)\s*$/.exec( line );
+			const named = /^\/(MAKEITEM|LOADMONSTER) (\S+)\s*$/i.exec( line );
 			if ( !named ) return line;
-			const amount = amounts.get( named[2]! ) ?? (named[1] === "LOADMONSTER" ? 1 : 0);
-			return "/" + named[1] + " " + named[2] + " " + amount;
+			const name = named[1]!.toUpperCase();
+			const amount = amounts.get( named[2]! ) ?? (name === "LOADMONSTER" ? 1 : 0);
+			return "/" + name + " " + named[2] + " " + amount;
 		},
 		/*
 		================

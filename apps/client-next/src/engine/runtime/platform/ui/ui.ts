@@ -301,7 +301,10 @@ export function createUiBridge(
 		) emit( { kind: "key", code, shift: event.shiftKey, ctrl: event.ctrlKey } );
 		if ( code === "Escape" && !event.repeat ) {
 			emit( { kind: "key", code, shift: event.shiftKey, ctrl: event.ctrlKey } );
-			(event.target as HTMLElement).blur();
+			// The GM prompt owns Escape: it dismisses the catalogue and keeps
+			// the caret, or closes the console through its own focus request.
+			// Blurring here wiped the focus the UI had just restored.
+			if ( current( event.target )?.value.id !== "gm-input" ) (event.target as HTMLElement).blur();
 		}
 		if ( event.key === "Enter" && !event.repeat && event.target instanceof HTMLInputElement ) {
 			event.preventDefault();

@@ -2724,6 +2724,7 @@ export function createUi(
 			gmHelper.select( Number( id.slice( "gm-helper-row:".length ) ) );
 			// The row button took DOM focus; Enter must reach the prompt again
 			// so it can run the row the GM just clicked.
+			focus = "gm-input";
 			focusRequest = { id: "gm-input", revision: ++focusRevision, caret: consoleText.length };
 			dirty = true;
 			return;
@@ -2734,6 +2735,7 @@ export function createUi(
 				gmHelper.selectTab( tab );
 				consoleText = "";
 				selection = [ 0, 0 ];
+				focus = "gm-input";
 				focusRequest = { id: "gm-input", revision: ++focusRevision, caret: 0 };
 			}
 			dirty = true;
@@ -6170,25 +6172,21 @@ export function createUi(
 				return;
 			}
 
-			// F3 is the VSRO-style item browser: it opens the GM console (or
-			// just the list when it is already open) with every item, and a
-			// second press closes the list.
+			// Port-only, not native: F3 toggles the catalogue only while the
+			// GM prompt owns focus. Gameplay and binding capture keep F3.
 			if (
 				event.kind === "key" && event.code === "F3" && view?.session?.phase === "world" &&
-				view.gameplay?.eligibility?.gm
+				view.gameplay?.eligibility?.gm && consolePhase !== 0 && focus === "gm-input"
 			) {
-				if ( gmHelper.browsing() ) gmHelper.closeBrowse();
-				else {
-					// F3 is a browse key, not the native console slide: show the
-					// whole list at once so its first row is not clipped.
-					if ( consolePhase === 0 || consolePhase === 2 ) {
-						consolePhase = 3;
-						consoleY = 0;
-					}
+				gmHelper.observe( consoleText, GM_HELPER_ROWS );
+				if ( gmHelper.active() || gmHelper.browsing() ) {
+					// Typed suggestions and F3 browse mode both close without
+					// discarding the command the GM is still editing.
+					gmHelper.dismiss( consoleText );
+				} else {
 					consoleText = "";
 					selection = [ 0, 0 ];
 					gmHelper.open( "items" );
-					focus = "gm-input";
 					focusRequest = { id: "gm-input", revision: ++focusRevision, caret: 0 };
 				}
 				dirty = true;
@@ -6234,6 +6232,7 @@ export function createUi(
 				// Escape closes the list first; the console stays open and keeps
 				// the prompt focused for the amount the GM still has to type.
 				gmHelper.dismiss( consoleText );
+				focus = "gm-input";
 				focusRequest = { id: "gm-input", revision: ++focusRevision, caret: consoleText.length };
 				dirty = true;
 				return;
