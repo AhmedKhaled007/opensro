@@ -191,6 +191,10 @@ func (v *WaterValidator) ResolveNavOwner(p simulation.Spawn, hint simulation.Nav
 	switch hint.Kind {
 	case simulation.NavOwnerObject:
 		if stand := v.standForOwner(hint); stand != nil {
+			if rebound := v.rebindStandToSector(stand, simulation.SectorX(p.RegionID), simulation.SectorY(p.RegionID)); rebound != nil {
+				stand = rebound
+				hint = stand.navOwner(stand.cellIndex)
+			}
 			if y, ok := stand.heightAt(grid.X, grid.Z); ok {
 				return hint, y, true
 			}
@@ -461,6 +465,15 @@ func (v *WaterValidator) ownerWalk(from simulation.Spawn, fromOwner simulation.N
 				continue
 			}
 			next, leave, enter := path.linkedContinuation(t)
+			if next == nil {
+				endT := path.spans[len(path.spans)-1].to
+				endSectorX := int(math.Floor((a.X + (b.X-a.X)*endT) / simulation.NativeRegionSize))
+				endSectorZ := int(math.Floor((a.Z + (b.Z-a.Z)*endT) / simulation.NativeRegionSize))
+				if rebound := v.rebindStandToSector(stand, endSectorX, endSectorZ); rebound != nil && rebound != stand {
+					path.stand = rebound
+					next, leave, enter = path.linkedContinuation(t)
+				}
+			}
 			if next != nil {
 				path.truncateAt(leave)
 				walk.paths = append(walk.paths, path)

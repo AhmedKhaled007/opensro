@@ -69,6 +69,46 @@ func TestGMWarpAuthorityAndReentry(t *testing.T) {
 	}
 }
 
+/*
+================
+TestGMWarpSurfaceStandAndStrandedAgreement
+
+ResolveGMWarpDestination lifts below-terrain Y onto SpawnSurfaceHeight, rejects
+points where SpawnSurfaceHeight fails, and still runs RelocateStrandedSpawn so
+that a surface stand on a stranded island or sealed roof cannot be accepted by
+ResolveGMWarpDestination and then rewritten by ReentryPackets.
+================
+*/
+func TestGMWarpSurfaceStandAndStrandedAgreement(t *testing.T) {
+	c := rebirthTestCharacter(20, 100)
+	c.GMPrivilege = true
+	rt, _ := newTestRuntime(c, testItems())
+	deps := rt.deps.(*enterworld.Deps)
+	deps.CanEnterWorldRegion = func(*enterworld.Character, uint16) bool { return true }
+	deps.SpawnTerrainHeight = func(uint16, float64, float64) (float64, bool) { return -45.6, true }
+	deps.SpawnSurfaceHeight = func(_ uint16, _, y, _ float64) (float64, bool) {
+		return 265.21, y >= 200
+	}
+	stranded := false
+	deps.RelocateStrandedSpawn = func(p simulation.Spawn) (simulation.Spawn, bool, bool) {
+		return p, stranded, stranded
+	}
+	deckTarget := simulation.Spawn{RegionID: 24199, X: 1145, Y: 272, Z: 576}
+	resolved, ok := deps.ResolveGMWarpDestination(c, deckTarget)
+	if !ok || resolved != deckTarget {
+		t.Fatalf("open elevated deck GM warp refused: got (%+v, %v), want (%+v, true)", resolved, ok, deckTarget)
+	}
+	stranded = true
+	if _, ok := deps.ResolveGMWarpDestination(c, deckTarget); ok {
+		t.Fatal("stranded surface stand accepted when RelocateStrandedSpawn reported stranded")
+	}
+	stranded = false
+	blockedTarget := simulation.Spawn{RegionID: 24199, X: 1145, Y: -45.6, Z: 576}
+	if _, ok := deps.ResolveGMWarpDestination(c, blockedTarget); ok {
+		t.Fatal("blocked surface target accepted")
+	}
+}
+
 func TestGMWarpRefusals(t *testing.T) {
 	for _, kind := range []string{"denied-region", "missing-terrain", "stranded", "pet", "dead", "malformed", "nonfinite", "out-of-region"} {
 		t.Run(kind, func(t *testing.T) {
