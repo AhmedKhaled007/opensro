@@ -106,6 +106,13 @@ export interface ExperimentalOptions {
 	// vectors without re-reading the target (CProjectileTrace_Process 8D8580,
 	// CProjectile_Bezier_Process 879650). Off unless turned on.
 	readonly homingProjectiles: boolean;
+	// Port-only, not native: left-clicking the attack pet's mini panel
+	// (CIFPetMiniInfo 6B3460 / 6B3760) selects the pet and toggles its companion
+	// window (CIFCos 69D920). Natively CIFPetMiniInfo::vftable (BFBDAC) inherits
+	// CIFWnd_GetMessageMap (53CC30 -> BD2CB8, initialized by BB20D0) and leaves
+	// vtable slot 29 at CIFWnd_DefaultLeftButtonDown (4B0740, no-op). Off unless
+	// turned on.
+	readonly petClickOpensWindow: boolean;
 }
 
 /*
@@ -183,7 +190,8 @@ export function experimentalOptions( value: unknown = null ): ExperimentalOption
 		noticeLinks: record.noticeLinks !== false,
 		shortNotices: record.shortNotices !== false,
 		confirmGuildBan: record.confirmGuildBan !== false,
-		homingProjectiles: enabled( "homingProjectiles" )
+		homingProjectiles: enabled( "homingProjectiles" ),
+		petClickOpensWindow: enabled( "petClickOpensWindow" )
 	};
 }
 
