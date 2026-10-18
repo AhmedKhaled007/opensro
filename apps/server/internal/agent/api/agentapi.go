@@ -265,6 +265,10 @@ func New(config Config) (*API, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agentapi: allowed origins: %w", err)
 	}
+	var revocationPath string
+	if dir := config.Store.Dir(); dir != "" {
+		revocationPath = filepath.Join(dir, revocationFloorFileName)
+	}
 	api := &API{
 		store:                   config.Store,
 		characterPresentation:   config.CharacterPresentation,
@@ -285,6 +289,9 @@ func New(config Config) (*API, error) {
 		maintenanceGatePath:     config.MaintenanceGatePath,
 		allowedOrigins:          allowedOrigins,
 		revocations:             newAccountRevoker(),
+	}
+	if err := api.revocations.bindPath(revocationPath); err != nil {
+		return nil, fmt.Errorf("agentapi: account revocations: %w", err)
 	}
 	log.Infof(
 		"agentapi: GameWorld control surface for shard %q; title login is owned by Agent",
