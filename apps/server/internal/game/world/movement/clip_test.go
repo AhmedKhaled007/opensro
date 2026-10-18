@@ -343,6 +343,106 @@ func TestClipMovementPathRealJanganVerandaRail(t *testing.T) {
 
 /*
 ================
+TestClipMovementPathRealRockInwardVertexDirection
+
+TestClipMovementPathRealRockInwardVertexDirection pins the two native
+object-nav invariants exposed by region 0x5C6D (23661) localUid 3073
+(asset 1160, rock_m_smalltree05_m_01.bms at x=985.87, y=3362.29, z=10.20):
+ 1. Several outline vertexDirections on asset 1160 point INWARD into srcCell.
+    When CRTNavMeshObj_EnterFromOutside (428300 / 9B4D30) stops a terrain
+    walker at a 0x3 outline edge and nudges it 0.01u inward via
+    outsideEdgeStart, the walker remains owned by terrain: subsequent steps
+    must neither flip into nativeCellEntry (0.2u centroid pull + object
+    ownership capture at y~3362.33) nor block an outward departure back to
+    open terrain.
+ 2. When an object-owned chord passes ~0.002u from shared vertex v[2] across
+    internal edges in[0] and in[1] to blocking outline out[3],
+    traceObjectCellsFrom must advance across cell 1 into cell 2 and clip at
+    out[3] rather than letting cell 1's -1e-4 endpoint tolerance swallow the
+    span midpoint and leak the chord through the corner.
+
+================
+*/
+func TestClipMovementPathRealRockInwardVertexDirection(t *testing.T) {
+	validator := realAuthorityValidator(t)
+
+	// 1. Terrain walker starts ~0.002u outside out[2] (v[0]->v[4], srcCell=1),
+	// whose endpoints both carry inward vertexDirections. Repeated clicks into
+	// the rock interior (985, 13) or across the rock to the far side (980, 13)
+	// must stay ClipBlocked on terrain outside out[2] without drifting across
+	// out[2] into the rock or capturing NavOwnerObject, and an outward click
+	// (escape) must arrive on open terrain.
+	terrainOwner := simulation.NavOwner{Kind: simulation.NavOwnerTerrain}
+	start := simulation.Spawn{RegionID: 0x5C6D, X: 991.1697, Y: 3364.8, Z: 13.7711}
+	interiorGoal := simulation.Spawn{RegionID: 0x5C6D, X: 985.0, Y: 3364.8, Z: 13.0}
+	step1 := validator.ClipMovementPathFrom(start, terrainOwner, interiorGoal)
+	if step1.Outcome != ClipBlocked || step1.Class != ClipClassObject {
+		t.Fatalf("step1 outcome = %s/%s (%+v), want blocked/object", step1.Outcome, step1.Class, step1)
+	}
+	if step1.RestOwner.Kind != simulation.NavOwnerTerrain || step1.Rest.Y < 3364.0 {
+		t.Fatalf("step1 captured terrain walker into object: rest=%+v owner=%+v", step1.Rest, step1.RestOwner)
+	}
+	cur, curOwner := step1.Rest, step1.RestOwner
+	for i := 2; i <= 5; i++ {
+		rep := validator.ClipMovementPathFrom(cur, curOwner, interiorGoal)
+		if rep.Outcome != ClipBlocked || rep.Class != ClipClassObject || rep.RestOwner.Kind != simulation.NavOwnerTerrain || rep.Rest.Y < 3364.0 {
+			t.Fatalf("interior repeat %d leaked or captured terrain walker into object: outcome=%s/%s rest=%+v owner=%+v",
+				i, rep.Outcome, rep.Class, rep.Rest, rep.RestOwner)
+		}
+		cur, curOwner = rep.Rest, rep.RestOwner
+	}
+
+	farGoal := simulation.Spawn{RegionID: 0x5C6D, X: 980.0, Y: 3364.8, Z: 13.0}
+	cur, curOwner = step1.Rest, step1.RestOwner
+	for i := 2; i <= 6; i++ {
+		step := validator.ClipMovementPathFrom(cur, curOwner, farGoal)
+		if step.Outcome != ClipBlocked || step.Class != ClipClassObject || step.RestOwner.Kind != simulation.NavOwnerTerrain || step.Rest.Y < 3364.0 {
+			t.Fatalf("far repeat %d leaked or captured terrain walker into object: outcome=%s/%s rest=%+v owner=%+v",
+				i, step.Outcome, step.Class, step.Rest, step.RestOwner)
+		}
+		cur, curOwner = step.Rest, step.RestOwner
+	}
+
+	escape := validator.ClipMovementPathFrom(cur, curOwner, simulation.Spawn{RegionID: 0x5C6D, X: 995.0, Y: 3364.8, Z: 15.0})
+	if escape.Outcome != ClipArrived || escape.RestOwner.Kind != simulation.NavOwnerTerrain {
+		t.Fatalf("escape from inward outline nudge failed: outcome=%s rest=%+v owner=%+v", escape.Outcome, escape.Rest, escape.RestOwner)
+	}
+
+	// Also verify the withinOutlineNudgeMargin safety net when a terrain walker
+	// starts 0.004u inside out[2]: 5 repeated clicks across the rock to farGoal
+	// must not drift out of the margin or capture NavOwnerObject, and an outward
+	// click must escape across out[2] to open terrain.
+	sliverCur := simulation.Spawn{RegionID: 0x5C6D, X: 991.1604, Y: 3364.8037, Z: 13.7711}
+	sliverOwner := terrainOwner
+	for i := 1; i <= 5; i++ {
+		step := validator.ClipMovementPathFrom(sliverCur, sliverOwner, farGoal)
+		if step.Outcome != ClipBlocked || step.Class != ClipClassObject || step.RestOwner.Kind != simulation.NavOwnerTerrain || step.Rest.Y < 3364.0 {
+			t.Fatalf("sliver repeat %d leaked or captured terrain walker into object: outcome=%s/%s rest=%+v owner=%+v",
+				i, step.Outcome, step.Class, step.Rest, step.RestOwner)
+		}
+		sliverCur, sliverOwner = step.Rest, step.RestOwner
+	}
+	sliverEscape := validator.ClipMovementPathFrom(sliverCur, sliverOwner, simulation.Spawn{RegionID: 0x5C6D, X: 995.0, Y: 3364.8, Z: 15.0})
+	if sliverEscape.Outcome != ClipArrived || sliverEscape.RestOwner.Kind != simulation.NavOwnerTerrain {
+		t.Fatalf("sliver escape failed: outcome=%s rest=%+v owner=%+v", sliverEscape.Outcome, sliverEscape.Rest, sliverEscape.RestOwner)
+	}
+
+	// 2. Near-vertex v[2] chord from inside cell 0 (localUid 3073) across
+	// in[0] -> in[1] -> out[3] must clip at out[3].
+	inRock := simulation.Spawn{RegionID: 0x5C6D, X: 982.6474609375, Y: 3362.327880859375, Z: 9.650390625}
+	rockOwner, _, ok := validator.ResolveNavOwner(inRock, simulation.NavOwner{})
+	if !ok || rockOwner.Kind != simulation.NavOwnerObject {
+		t.Fatalf("ResolveNavOwner at rock interior = %+v (ok=%v), want NavOwnerObject", rockOwner, ok)
+	}
+	corner := validator.ClipMovementPathFrom(inRock, rockOwner, simulation.Spawn{RegionID: 0x5C6D, X: 936.0, Y: 3361.0, Z: 37.0})
+	if corner.Outcome != ClipBlocked || corner.Class != ClipClassObject || corner.RestOwner.Kind != simulation.NavOwnerObject {
+		t.Fatalf("near-vertex chord leaked across out[3]: outcome=%s/%s rest=%+v owner=%+v",
+			corner.Outcome, corner.Class, corner.Rest, corner.RestOwner)
+	}
+}
+
+/*
+================
 BenchmarkClipMovementPathWarm
 
 BenchmarkClipMovementPathWarm pins the warm per-move cost of the clip
