@@ -188,18 +188,48 @@ items). Only PvP capes own a team value; keep strict validation for them.
 	let awaitingTravelBootstrap = false;
 	let publishedShop: import("@/engine/contracts/gameplay").GameplayState["shop"];
 	let publishedCatalog: import("@/engine/contracts/gameplay").GameplayState["skillCatalog"],
+		retainedCatalog: import("@/engine/contracts/gameplay").GameplayState["skillCatalog"],
+		publishedGmCatalog: import("@/engine/contracts/gameplay").GameplayState["gmCatalog"],
+		retainedGmCatalog: import("@/engine/contracts/gameplay").GameplayState["gmCatalog"],
 		publishedSocial: import("@/engine/contracts/gameplay").GameplayState["social"];
 	/*
 ================
 invalidateProjection
 Forces the next gameplay publish to resend the large, rarely changing
-fields (shop, skill catalog, social).
+fields (shop, skill catalog, GM catalog, social).
 ================
 	*/
 	function invalidateProjection() {
 		publishedShop = undefined;
 		publishedCatalog = undefined;
+		publishedGmCatalog = undefined;
 		publishedSocial = undefined;
+	}
+	/*
+================
+sameSkillCatalog
+
+A bootstrap rebuilds the skill catalogue from the same reference
+snapshot: new objects, the same rows. Content equality is what
+"unchanged" means for the projection, so a portal entry does not
+resend the catalogue beside the destination's spawn burst (F11-DC1).
+The catalogue is plain data; the walk short-circuits on the first
+row that differs.
+================
+	*/
+	function sameSkillCatalog( a: unknown, b: unknown ): boolean {
+		if ( a === b ) return true;
+		if ( Array.isArray( a ) && Array.isArray( b ) ) {
+			return a.length === b.length && a.every( ( row, i ) => sameSkillCatalog( row, b[i] ) );
+		}
+		if ( a && b && typeof a === "object" && typeof b === "object" ) {
+			const aKeys = Object.keys( a ), bKeys = Object.keys( b );
+			return aKeys.length === bKeys.length &&
+				aKeys.every( key =>
+					sameSkillCatalog( (a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key] )
+				);
+		}
+		return false;
 	}
 	/*
 ================
@@ -369,8 +399,12 @@ the entry continues it like the one after a world transfer.
 					entryRegion <= 65535 ?
 				entryRegion :
 				undefined;
-			invalidateProjection();
 			const travel = awaitingTravelBootstrap;
+			if ( !travel && !resumed ) {
+				retainedCatalog = undefined;
+				retainedGmCatalog = undefined;
+			}
+			invalidateProjection();
 			entities.bootstrap( value, travel );
 			awaitingTravelBootstrap = false;
 			gameplay.bootstrap( value, travel || resumed, receivedAtMs );
@@ -486,18 +520,30 @@ Advances entities and gameplay, then publishes the changed gameplay state.
 			}
 			const state = gameplay.take();
 			if ( state ) {
-				const { skillCatalog, social, shop, ...dynamic } = state;
+				const { skillCatalog, gmCatalog, social, shop, ...dynamic } = state;
+				const catalog = retainedCatalog && sameSkillCatalog( skillCatalog, retainedCatalog ) ?
+					retainedCatalog :
+					skillCatalog;
+				retainedCatalog = catalog;
+				const catalogChanged = catalog !== publishedCatalog;
+				const gm = gmCatalog && retainedGmCatalog && sameSkillCatalog( gmCatalog, retainedGmCatalog ) ?
+					retainedGmCatalog :
+					gmCatalog;
+				if ( gm ) retainedGmCatalog = gm;
+				const gmChanged = Boolean( gm ) && gm !== publishedGmCatalog;
 				entities.publish( {
 					kind: "gameplay",
 					state: {
 						...dynamic,
 						...(shop !== publishedShop ? { shop } : {}),
-						...(skillCatalog !== publishedCatalog ? { skillCatalog } : {}),
+						...(catalogChanged ? { skillCatalog: catalog } : {}),
+						...(gmChanged && gm ? { gmCatalog: gm } : {}),
 						...(social !== publishedSocial ? { social } : {})
 					}
 				} );
 				publishedShop = shop;
-				publishedCatalog = skillCatalog;
+				if ( catalogChanged ) publishedCatalog = catalog;
+				if ( gmChanged ) publishedGmCatalog = gm;
 				publishedSocial = social;
 			}
 		},
@@ -529,6 +575,8 @@ clear
 			bootstrapRegion = undefined;
 			pendingTravel = null;
 			loadingMode = 0;
+			retainedCatalog = undefined;
+			retainedGmCatalog = undefined;
 			invalidateProjection();
 			gameplay.reset();
 			entities.clear();

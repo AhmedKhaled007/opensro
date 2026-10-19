@@ -112,10 +112,11 @@ export function createEntities(
 	const pendingPoses = new Map<number, { index: number; size: number; }>();
 	// The queued gameplay snapshot a newer one merges into (supersedeGameplay).
 	let pendingGameplay: { index: number; size: number; } | undefined;
-	// Arrays the queued batch has already counted (journal-cost.ts): the batch
+	// Values the queued batch has already counted (journal-cost.ts): the batch
 	// is one structured clone, so a walking path shared by many state events
 	// travels once. Replaceable events (poses, the gameplay snapshot) are
-	// costed in full instead, so replacing one never uncounts a shared array.
+	// costed against their own graph instead, so replacing one never uncounts
+	// a shared value.
 	let sharedArrays = new WeakSet<object>();
 	let stagedMode = 1, removalTail = new Uint8Array( 0 );
 	let synchronized = false, localName = "", localActiveJob = 4;
@@ -132,9 +133,27 @@ export function createEntities(
 	}
 	/*
 	================
+	snapshotCost
+
+	One gameplay snapshot is one coalesced slot in the batch: its own
+	internal graph is costed with a fresh shared set, and the static
+	bootstrap reference tables (skillCatalog, gmCatalog) that ride once on
+	that coalesced slot are not charged against the dynamic world-event
+	backlog. Without this, the 27,835-row skill catalogue (~27.1 MB in
+	UTF-16) plus GM catalogue (~5.8 MB) consumed 33 MB of the 32 MiB
+	journal budget on entry and the first cave spawn burst behind it broke
+	the limit (F11-DC1).
+	================
+	*/
+	function snapshotCost( event: Extract<WorldEvent, { kind: "gameplay"; }> ) {
+		const { skillCatalog: _skills, gmCatalog: _gm, ...dynamic } = event.state;
+		return journalCost( { kind: "gameplay", state: dynamic }, new WeakSet<object>() );
+	}
+	/*
+	================
 	batchCost
 
-	A reliable event's cost within the queued batch: arrays an earlier event
+	A reliable event's cost within the queued batch: values an earlier event
 	of the batch carries count once (sharedArrays).
 	================
 	*/
@@ -197,13 +216,13 @@ export function createEntities(
 	function supersedeGameplay( event: Extract<WorldEvent, { kind: "gameplay"; }> ) {
 		const queued = pendingGameplay && events[pendingGameplay.index];
 		if ( !pendingGameplay || queued?.kind !== "gameplay" ) {
-			const size = cost( event );
+			const size = snapshotCost( event );
 			append( event, size );
 			pendingGameplay = { index: events.length - 1, size };
 			return;
 		}
 		const state = mergeGameplaySnapshots( queued.state, event.state );
-		const merged: WorldEvent = { kind: "gameplay", state }, size = cost( merged );
+		const merged: WorldEvent = { kind: "gameplay", state }, size = snapshotCost( merged );
 		const nextBytes = bytes - pendingGameplay.size + size;
 		if ( nextBytes + stagedBytes > journalByteLimit ) {
 			throw Error( "Reliable world journal gameplay byte capacity exceeded" );
