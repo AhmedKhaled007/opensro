@@ -199,6 +199,8 @@ import {
 	PET_GEAR_SLOTS,
 	PET_TRAINING_OP,
 	petRowCooldown,
+	petStateAsk,
+	type PetStateAsk,
 	petCooldownQuads,
 	petRows,
 	petSkillHelp,
@@ -1424,6 +1426,8 @@ export function createUi(
 		cosDraft = 0,
 		// The wolf whose training state this window last asked for (port-only).
 		petTrainingAskedRef = 0,
+		// The quickslot bar's own asks for that state (petStateAsk).
+		petStateAsked: PetStateAsk = { ref: 0, asks: 0, atMs: 0 },
 		cosBoundGid = 0,
 		cosBoundMode: number | undefined,
 		guildDialog = "",
@@ -10715,7 +10719,11 @@ export function createUi(
 				if ( hudData && game && hudData.root.GDR_MAGICSTATEBOARD ) {
 					const origin = authoredRect( hudData.root.GDR_MAGICSTATEBOARD, 0, 0 );
 					if ( game.buffSlots?.length ) paths.push( "/assets/images/Media_extracted/icon/buf_effect.png" );
-					for ( const icon of buffBoard( game, next.simulationTimeMs ?? 0, boardSuppressed ) ) {
+					const ownerPet = experimental.state().saved.attackPetTraining &&
+							game.cosRecords?.some( pet => pet.gid === game.petTraining?.gid && pet.hp > 0 ) ?
+						game.petTraining :
+						undefined;
+					for ( const icon of buffBoard( game, next.simulationTimeMs ?? 0, boardSuppressed, ownerPet ) ) {
 						if ( !icon.path ) continue;
 						const r: UiRect = [ origin[0] + icon.x, origin[1] + icon.y, 20, 20 ];
 						paths.push( icon.path );
@@ -10737,7 +10745,23 @@ export function createUi(
 							blocks.push( r );
 							continue;
 						}
-						if ( resources.has( icon.path ) ) rect( r, white, icon.path );
+						if ( resources.has( icon.path ) ) rect( r, white, icon.path, icon.uv );
+						if ( icon.ready ) {
+							const gold = [ 1, 0.78, 0.2, 1 ] as const;
+							for (
+								const edge of [
+									[ r[0] - 1, r[1] - 1, 22, 1 ],
+									[ r[0] - 1, r[1] + 20, 22, 1 ],
+									[ r[0] - 1, r[1], 1, 20 ],
+									[ r[0] + 20, r[1], 1, 20 ]
+								] as UiRect[]
+							) rect( edge, gold );
+						}
+						if ( icon.stack !== undefined ) {
+							const badges = petStackQuads( icon.stack, r, full );
+							for ( const quad of badges ) if ( quad.texture ) paths.push( quad.texture );
+							quads.push( ...badges );
+						}
 						if ( icon.suppressed ) {
 							for ( const layer of admittanceOverlay() ) {
 								paths.push( layer );
@@ -11449,10 +11473,14 @@ export function createUi(
 						record.band === 3 && !record.dead && record.hp > 0
 					);
 					if ( !attackPet ) petTrainingAskedRef = 0;
-					if (
-						experimental.state().saved.attackPetTraining && attackPet &&
-						petTrainingAskedRef !== attackPet.refObjId
-					) {
+					const stateAsk = petStateAsk(
+						petStateAsked,
+						experimental.state().saved.attackPetTraining ? attackPet : undefined,
+						game?.petTraining?.gid,
+						Date.now()
+					);
+					petStateAsked = stateAsk.next;
+					if ( stateAsk.ask && attackPet ) {
 						petTrainingAskedRef = attackPet.refObjId;
 						sendGameplay( {
 							kind: "cos-training",
