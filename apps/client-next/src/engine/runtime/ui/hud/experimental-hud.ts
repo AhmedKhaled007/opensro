@@ -253,6 +253,11 @@ export const EXPERIMENTAL_TABS: readonly {
 			id: "experimental-pet-click-opens-window",
 			label: "Pet panel opens window",
 			description: "Click a pet panel to open its window."
+		}, {
+			key: "expandedWorldMap",
+			id: "experimental-expanded-world-map",
+			label: "Expanded world map",
+			description: "Show extra town pages and wider overview."
 		} ]
 	}
 ];

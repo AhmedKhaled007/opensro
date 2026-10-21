@@ -44,7 +44,12 @@ import {
 	buildNativeDirectSoundResources,
 	buildWeatherSoundResources
 } from "../shared/audioResources.mjs";
-import { buildGuideImageResources, imagePublicPath, registerSpriteResource } from "../shared/cifResources.mjs";
+import {
+	buildGuideImageResources,
+	buildSkillDataIconResources,
+	imagePublicPath,
+	registerSpriteResource
+} from "../shared/cifResources.mjs";
 import {
 	itemMallRuntimeImageReferences,
 	quickslotRuntimeImageReferences,
@@ -749,10 +754,12 @@ export const LOOSE_FAMILIES = {
 		kind: "publish",
 		label: "native skill window projection",
 		packFolder: "skill-ui",
-		defaultGroup: ( file, index ) => groupOf( index, SKILL_MASTERY_DATA ),
+		defaultGroup: ( file, index ) =>
+			isImageAsset( file ) ? imagePackGroup( file ) : groupOf( index, SKILL_MASTERY_DATA ),
 		async produce() {
 			await runPython( [ SKILL_UI_SCRIPT ], { task: "Native skill UI projection" } );
-			return { files: await packedJson( [ "/assets/data/skillUi.json" ] ) };
+			const icons = await buildSkillDataIconResources();
+			return { files: [ ...await packedJson( [ "/assets/data/skillUi.json" ] ), ...icons.copiedImages ] };
 		}
 	},
 	// The native RNG state after the sky stars are constructed, so later draws

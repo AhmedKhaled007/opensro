@@ -307,6 +307,21 @@ async function collectSkillDataIconDdjReferences() {
 
 /*
 ================
+buildSkillDataIconResources
+
+Focused skill publication must carry its newly referenced icons, just as
+the full CIF build does. Keep the native absent-icon policy in the shared
+copy owner rather than inventing replacement artwork.
+================
+*/
+export async function buildSkillDataIconResources() {
+	const copiedImages = new Set();
+	await copyItemDataIconImages( await collectSkillDataIconDdjReferences(), copiedImages );
+	return { copiedImages };
+}
+
+/*
+================
 collectCosCharacterIconDdjReferences
 
 COS character icons, data-driven: the RefObjCommon icon column (source

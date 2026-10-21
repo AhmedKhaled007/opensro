@@ -41,8 +41,18 @@ every game lane receive that same authority before network traffic starts.
 ================================================================================
 */
 
+/*
+================
+questDefinitionLoader
+================
+*/
 type questDefinitionLoader func() (*quest.Definitions, error)
 
+/*
+================
+authorityPlane
+================
+*/
 type authorityPlane struct {
 	store      *store.Store
 	agentAPI   *agentapi.API
@@ -210,6 +220,11 @@ func openAuthorityPlane(
 	}
 	authorityStore.ReconcileGMPrivilege(gmIdentities)
 
+	levelCap, err := progression.LevelCapFromEnv()
+	if err != nil {
+		authorityStore.Close()
+		return authorityPlane{}, err
+	}
 	config := agentapi.Config{
 		Store:                 authorityStore,
 		CharacterPresentation: characterPresentationProjector(characterRoster, textdata.Levels),
@@ -225,7 +240,7 @@ func openAuthorityPlane(
 		MaintenanceGatePath:     strings.TrimSpace(os.Getenv(agentapi.EnvMaintenanceGate)),
 		AuthoredAreas:           devPaths.AuthoredAreas,
 		BenchmarkFixtureControl: os.Getenv(agentapi.EnvBenchmarkFixtureControl) == "1",
-		LevelCap:                progression.LevelCap,
+		LevelCap:                levelCap,
 		SkillGroup: func(id uint32) (uint32, bool) {
 			row, ok := textdata.Skills.SkillByID(id)
 			return row.Group, ok

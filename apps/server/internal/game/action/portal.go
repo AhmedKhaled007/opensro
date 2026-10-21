@@ -20,6 +20,7 @@ import (
 	"opensro.online/server/internal/game/enterworld"
 	"opensro.online/server/internal/game/item/grounditem"
 	"opensro.online/server/internal/game/item/wire"
+	"opensro.online/server/internal/game/world/alexandria"
 	"opensro.online/server/internal/game/world/fortress"
 	"opensro.online/server/internal/game/world/instance"
 	"opensro.online/server/internal/game/world/monster"
@@ -121,9 +122,13 @@ loadPortalCatalog
 */
 func loadPortalCatalog(dir string) (*portalCatalog, error) {
 	key := texttable.Fingerprint(filepath.Join(dir, "teleportbuilding.txt"),
-		filepath.Join(dir, "teleportdata.txt"), filepath.Join(dir, "teleportlink.txt"))
+		filepath.Join(dir, "teleportdata.txt"), filepath.Join(dir, "teleportlink.txt"),
+		filepath.Join(dir, alexandria.OverlayFile))
 	if monster.QinShiTombFromEnv() {
 		key += "+qinshi_tomb"
+	}
+	if on, _ := alexandria.EnabledFromEnv(); on {
+		key += "+alexandria"
 	}
 	parsed := portalCatalogParses.Get(key, func() *portalCatalogParse {
 		catalog, err := parsePortalCatalog(dir)
@@ -133,8 +138,8 @@ func loadPortalCatalog(dir string) (*portalCatalog, error) {
 }
 
 // portalCatalogParse is one immutable reading of the teleport tables; every
-// runtime over the same files and Qin-Shi setting shares it, and nothing
-// writes to a loaded catalog.
+// runtime over the same files, Qin-Shi and Alexandria settings shares it,
+// and nothing writes to a loaded catalog.
 type portalCatalogParse struct {
 	catalog *portalCatalog
 	err     error
@@ -154,6 +159,13 @@ func parsePortalCatalog(dir string) (*portalCatalog, error) {
 	buildings := map[uint32]bool{}
 	fortressGates := map[uint32]bool{}
 	gateKinds := map[uint32]uint8{}
+	// Port-only, not native: while SRO_ALEXANDRIA is off the catalogue skips
+	// Alexandria's appended gates, their buildings and every link to them.
+	hidden, err := alexandria.Hidden(dir)
+	if err != nil {
+		return nil, err
+	}
+	hiddenIDs := map[uint32]bool{}
 	buildingRows := enterworld.ReadTextdataFile(filepath.Join(dir, "teleportbuilding.txt"))
 	if len(buildingRows) == 0 {
 		return nil, fmt.Errorf("teleportbuilding is absent or empty")
@@ -164,6 +176,9 @@ func parsePortalCatalog(dir string) (*portalCatalog, error) {
 		}
 		if len(r) < 2 {
 			return nil, fmt.Errorf("truncated teleportbuilding")
+		}
+		if len(r) > 2 && hidden.HidesBuilding(r[2]) {
+			continue
 		}
 		id, e := number(r[1])
 		if e != nil {
@@ -200,6 +215,10 @@ func parsePortalCatalog(dir string) (*portalCatalog, error) {
 		id, e := number(r[1])
 		if e != nil || id == 0 {
 			return nil, fmt.Errorf("teleportdata identity at row %d", i+1)
+		}
+		if hidden.HidesTeleport(r[2]) {
+			hiddenIDs[id] = true
+			continue
 		}
 		ref, e := number(r[3])
 		if e != nil {
@@ -269,6 +288,9 @@ func parsePortalCatalog(dir string) (*portalCatalog, error) {
 			return nil, fmt.Errorf("teleportlink row %d unsupported scheduling/combination", i+1)
 		}
 		link := portalLink{source: values[0], target: values[1], fee: int64(values[2])}
+		if hiddenIDs[link.source] || hiddenIDs[link.target] {
+			continue
+		}
 		if _, ok := c.destinations[link.source]; !ok {
 			return nil, fmt.Errorf("missing source teleport %d", link.source)
 		}

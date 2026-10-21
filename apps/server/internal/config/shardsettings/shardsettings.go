@@ -19,7 +19,13 @@ package shardsettings
 
 import "strings"
 
-// Source says who fills a setting's job variable.
+/*
+================
+Source
+
+Who fills a setting's job variable.
+================
+*/
 type Source int
 
 const (
@@ -53,6 +59,8 @@ var Settings = []Setting{
 	{Env: "SRO_BETA_STARTER_KIT", NomadVar: "beta_starter_kit", Default: "on"},
 	{Env: "SRO_BETA_PLAYER_MAP", NomadVar: "beta_player_map", Default: "on"},
 	{Env: "SRO_BETA_MASTERY", NomadVar: "beta_mastery", Default: "on", Catalogue: true, Source: Built},
+	// Port-only, not native: optional expansion; deployments stay at 90.
+	{Env: "SRO_LEVEL_CAP", NomadVar: "level_cap", Default: "off", Catalogue: true},
 	{Env: "SRO_BETA_SILK", NomadVar: "beta_silk", Default: "50"},
 	// Grab and growth pets at four fifths of their run speed (#320): never
 	// deployed, so the deployment default stays native.
@@ -186,6 +194,11 @@ var Settings = []Setting{
 	// before the Legend IV server tables); opened in the shard defaults
 	// 2026-10-21 (GH #1013). "off" is native.
 	{Env: "SRO_QINSHI_TOMB", NomadVar: "qinshi_tomb", Default: "on", Catalogue: true},
+	// The Alexandria city of a build_alexandria_variant.py game root: its
+	// regions, gates and NPCs (port-only, not native; internal/game/world/
+	// alexandria). "off" is native and hides them from a variant's data;
+	// the catalogue's NPC list follows it.
+	{Env: "SRO_ALEXANDRIA", NomadVar: "alexandria", Default: "off", Catalogue: true},
 }
 
 // NotSettings are the job's other SRO_ variables: what a deployment

@@ -358,6 +358,10 @@ func run(out, release, textdata string) error {
 		}
 		catalogue.ApplyTradeRoutes(tradeQuotes, func(npcID, itemID uint32) int64 { return route(codenames[npcID], itemID) }, action.RaiseRouteProfit)
 	}
+	levelCap, err := progression.LevelCapFromEnv()
+	if err != nil {
+		return err
+	}
 	files := map[string]any{
 		"items.json":    catalogue.ItemsFile{Header: header, Items: items},
 		"quests.json":   catalogue.QuestsFile{Header: header, Quests: quests},
@@ -375,7 +379,7 @@ func run(out, release, textdata string) error {
 		"search.json":     catalogue.SearchFile{Header: header, Entries: []catalogue.SearchEntry{}},
 		"atlas.json":      catalogue.NewAtlas(header),
 		"notes.json":      catalogue.NotesFile{Header: header, Entries: []catalogue.NoteEntry{}},
-		"levels.json":     catalogue.BuildLevels(header, enterworld.NewTextdataLevels(dir), betaMastery),
+		"levels.json":     catalogue.BuildLevels(header, enterworld.NewTextdataLevels(dir), betaMastery, levelCap),
 		"trade.json":      catalogue.TradeFile{Header: header, ThiefRate: catalogue.ThiefRate(), Quotes: tradeQuotes},
 		"droptables.json": catalogue.BuildDropTables(monsters, dropItemID, header),
 		"summary.json": catalogue.Summarize(header, catalogue.SummaryInput{Items: catalogue.ItemStandings(items),

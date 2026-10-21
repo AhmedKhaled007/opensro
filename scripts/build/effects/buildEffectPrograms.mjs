@@ -448,7 +448,7 @@ collectMeshPaths
 The BMS meshes an effect's object tree and controllers reference.
 ================
 */
-function collectMeshPaths( effect ) {
+export function collectMeshPaths( effect ) {
 	const paths = new Set();
 	const visitResource = ( resource ) => {
 		for ( const mesh of resource?.meshes ?? [] ) {

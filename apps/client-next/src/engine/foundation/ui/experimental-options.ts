@@ -136,6 +136,11 @@ export interface ExperimentalOptions {
 	// when on, keep bit 0x80 enabled on full-bag errors and pause non-gold item
 	// pickup until bag space changes so the pet keeps picking up gold. Default on.
 	readonly smartPetPickup: boolean;
+	// Port-only, not native: when the build publishes extra worldmap_mapinfo
+	// town pages (Alexandria) and a wider overview box, the M window uses them
+	// instead of the five native town pages and 28 x 8 overview (5758D0). Off
+	// unless turned on.
+	readonly expandedWorldMap: boolean;
 }
 
 /*
@@ -218,7 +223,8 @@ export function experimentalOptions( value: unknown = null ): ExperimentalOption
 		confirmGuildBan: record.confirmGuildBan !== false,
 		homingProjectiles: enabled( "homingProjectiles" ),
 		petClickOpensWindow: record.petClickOpensWindow !== false,
-		smartPetPickup: record.smartPetPickup !== false
+		smartPetPickup: record.smartPetPickup !== false,
+		expandedWorldMap: enabled( "expandedWorldMap" )
 	};
 }
 

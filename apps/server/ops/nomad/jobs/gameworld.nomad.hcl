@@ -149,6 +149,13 @@ variable "beta_mastery" {
   default = "on"
 }
 
+# Port-only, not native: 110 raises the stopping level on the installed
+# v1.150 curve. Off keeps cap 90; expansion content is enabled separately.
+variable "level_cap" {
+  type    = string
+  default = "off"
+}
+
 # beta_silk is the silk one in-world hour earns into the account's real Item
 # Mall wallet (BUG-062, port-only): earning pauses at 1500, and a new account
 # starts with 300. Earned silk is REAL and survives "off", which only stops
@@ -739,6 +746,14 @@ variable "qinshi_tomb" {
   default = "on"
 }
 
+# alexandria registers the Alexandria city a variant game data carries: its
+# regions, gates and NPCs (port-only, not native). "off" is native; "on"
+# refuses to start without the variant's overlay.
+variable "alexandria" {
+  type    = string
+  default = "off"
+}
+
 # The community site's public read API listener (internal/agent/publicstats):
 # a loopback address, or "off". sro-nomad gives the first shard the default
 # and every other shard "off".
@@ -884,6 +899,7 @@ job "sro-gameworld-__SHARD_ID__" {
         SRO_BETA_STARTER_KIT                    = var.beta_starter_kit
         SRO_BETA_PLAYER_MAP                     = var.beta_player_map
         SRO_BETA_MASTERY                        = var.beta_mastery
+        SRO_LEVEL_CAP                      = var.level_cap
         SRO_BETA_SILK                           = var.beta_silk
         SRO_MAINTENANCE_GATE_PATH               = var.maintenance_gate_path
         SRO_PET_PACING                          = var.pet_pacing
@@ -960,6 +976,7 @@ job "sro-gameworld-__SHARD_ID__" {
         SRO_BETA_SHOP_ONLY_DEGREE9              = var.beta_shop_only_degree9
         SRO_STACK_SIZES                         = var.stack_sizes
         SRO_QINSHI_TOMB                         = var.qinshi_tomb
+        SRO_ALEXANDRIA                          = var.alexandria
         SRO_PUBLIC_API_ADDR                     = var.public_api_addr
         SRO_PUBLIC_API_TOKEN_PATH               = "${NOMAD_SECRETS_DIR}/public-api-token"
         TRANSPORT_WT_ADDR                       = "${NOMAD_IP_transport}:${NOMAD_PORT_transport}"

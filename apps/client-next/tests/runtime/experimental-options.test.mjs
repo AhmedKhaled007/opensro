@@ -72,7 +72,9 @@ const OFF = Object.freeze( {
 	petClickOpensWindow: true,
 	// On by default (owner 2026-10-20): keep bit 0x80 enabled on 0xB4/0xB5 so the
 	// pet keeps picking up gold when full; off restores the native 0x0077DD61 disable.
-	smartPetPickup: true
+	smartPetPickup: true,
+	// Off by default: the M window shows only the five native towns and 28 x 8 overview.
+	expandedWorldMap: false
 } );
 
 test("only an explicit boolean enables chat timestamps", () => {
@@ -516,4 +518,16 @@ test("smart pet pickup defaults on unless explicitly false and reaches the worke
 	assert.equal( off.smartPetPickup, false );
 	assert.equal( experimentalGameplay( off ).smartPetPickup, false );
 	assert.ok( EXPERIMENTAL_TABS.some( tab => tab.rows.some( row => row.key === "smartPetPickup" ) ) );
+});
+
+test("expanded world map defaults off (native five towns and 28 x 8 overview) and stays out of the worker's slices", () => {
+	for ( const value of [ undefined, null, {}, { expandedWorldMap: 1 }, { expandedWorldMap: "true" } ] ) {
+		const options = experimentalOptions( value );
+		assert.equal( options.expandedWorldMap, false );
+		assert.equal( "expandedWorldMap" in experimentalGameplay( options ), false );
+		assert.equal( "expandedWorldMap" in experimentalVideo( options ), false );
+	}
+	const on = experimentalOptions( { expandedWorldMap: true } );
+	assert.equal( on.expandedWorldMap, true );
+	assert.ok( EXPERIMENTAL_TABS.some( tab => tab.rows.some( row => row.key === "expandedWorldMap" ) ) );
 });
