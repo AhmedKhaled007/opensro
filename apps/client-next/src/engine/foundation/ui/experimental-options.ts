@@ -41,6 +41,8 @@ export interface ExperimentalOptions {
 	// weapons and shields (equipmentEnchantSparks). On by default (owner
 	// 2026-10-17); an explicit false restores the native v1.150 look.
 	readonly enchantSparks: boolean;
+	// Port-only wolf skill tree controls; requires the server's matching opt-in.
+	readonly attackPetTraining: boolean;
 	// Port-only, not native: a device without BC is served re-encoded
 	// textures (texture-variants.ts) instead of decoding them to RGBA.
 	// Read when the asset worker starts, so it applies from the next load.
@@ -212,6 +214,7 @@ export function experimentalOptions( value: unknown = null ): ExperimentalOption
 		dropOnBagTab: record.dropOnBagTab !== false,
 		noticeLinks: record.noticeLinks !== false,
 		shortNotices: record.shortNotices !== false,
+		attackPetTraining: enabled( "attackPetTraining" ),
 		confirmGuildBan: record.confirmGuildBan !== false,
 		homingProjectiles: enabled( "homingProjectiles" ),
 		petClickOpensWindow: record.petClickOpensWindow !== false,

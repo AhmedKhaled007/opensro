@@ -166,3 +166,25 @@ func (rt *Runtime) planInventoryItemsGrant(
 	}
 	return alchemyRows(c.MissionInventory, before, after), frames, nil
 }
+
+/*
+================
+planBagChange
+
+Applies change to a copy of the bag and plans the resulting rows and the
+client's receipts (references, then per-slot delete and grant frames). The
+caller owns the transaction and commits the rows; a failed change plans
+nothing.
+================
+*/
+func (rt *Runtime) planBagChange(c *enterworld.Character, change func(inv *inventory.Inventory) error) ([]enterworld.InventoryRow, []wire.Frame, error) {
+	if c == nil || c.DeletePending {
+		return nil, nil, fmt.Errorf("bag change: unavailable character")
+	}
+	before := invItemsFromBag(c)
+	inv := inventory.New(before, inventory.BagEnd(c))
+	if err := change(inv); err != nil {
+		return nil, nil, err
+	}
+	return rt.planInventoryGrant(c, before, inv, nil, nil)
+}

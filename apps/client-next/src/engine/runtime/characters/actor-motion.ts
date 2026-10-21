@@ -728,11 +728,15 @@ export function createActorMotion( owner: ActorOwner ) {
 					posture.kind === "recover" ?
 					"wakeup" :
 					"down";
+				const duration = resources.duration( resource.glb, role );
 				const projected = bindLayers(
-					postureLayers( posture, seconds, resources.duration( resource.glb, role ) ),
+					postureLayers( posture, seconds, duration ),
 					"posture",
 					posture.started
-				).filter( layer => resource.clips.includes( layer.clip ) );
+				).filter( layer =>
+					resource.clips.includes( layer.clip ) ||
+					(layer.clip === "pet-roar" && role === "pet-roar" && duration > 0)
+				);
 				if ( posture.kind === "down" ) layers.splice( 0, layers.length, ...projected );
 				else layers.unshift( ...projected );
 			}
@@ -943,7 +947,11 @@ export function createActorMotion( owner: ActorOwner ) {
 					layers[0]!.time :
 					Math.max( 0, seconds - state.started ),
 				loop: looping,
-				scale: Math.fround( baseScale * appearance.scale )
+				scale: Math.fround(
+					baseScale * appearance.scale *
+						(1 +
+							((entity.petResolve?.untilMs ?? 0) > seconds * 1000 ? entity.petResolve!.stacks * .012 : 0))
+				)
 			} );
 			if ( sampleActorDetails ) probe?.detailEnd( "actor-record" );
 			if ( refresh.mask & 0x200 ) {

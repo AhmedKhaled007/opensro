@@ -503,6 +503,11 @@ variable "team_death_revive" {
 # likely. beta_drop_cap keeps a kill to that many ordinary items (a uniform
 # random subset; gold heaps and a unique's prepass are never cut; 0 = no cap).
 # "off" restores the native rates.
+variable "attack_pet_expansion" {
+  type = string
+  default = "off"
+}
+
 variable "beta_growth" {
   type    = string
   default = "on"
@@ -926,6 +931,7 @@ job "sro-gameworld-__SHARD_ID__" {
         SRO_ALCHEMY_RATES                       = var.alchemy_rates
         SRO_ALCHEMY_MAX_PLUS                    = var.alchemy_max_plus
         SRO_TEAM_DEATH_REVIVE                   = var.team_death_revive
+        SRO_ATTACK_PET_EXPANSION                = var.attack_pet_expansion
         SRO_BETA_GROWTH                         = var.beta_growth
         SRO_BETA_SKILL_EXP_RATE                 = var.beta_skill_exp_rate
         SRO_BETA_DROP_RATE                      = var.beta_drop_rate

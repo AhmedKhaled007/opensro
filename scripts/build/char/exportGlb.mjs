@@ -515,15 +515,18 @@ export function avatarToGlb( avatar ) {
 		if ( texInfo.pngPath && !fs.existsSync( texInfo.pngPath ) ) {
 			throw new Error( `${avatar.name}:${matName}: converted texture is missing at ${texInfo.pngPath}` );
 		}
-		if ( texInfo.pngPath ) {
-			let imageIndex = imageIndexBySourcePath.get( texInfo.pngPath );
+		if ( texInfo.pngPath || texInfo.pngBytes ) {
+			const imageKey = texInfo.pngPath ?? texInfo.pngBytes;
+			let imageIndex = imageIndexBySourcePath.get( imageKey );
 			if ( imageIndex === undefined ) {
-				const texture = readCharacterTexture( texInfo.texturePath, texInfo.pngPath );
+				const texture = texInfo.pngBytes ?
+					{ bytes: texInfo.pngBytes, mime: "image/png" } :
+					readCharacterTexture( texInfo.texturePath, texInfo.pngPath );
 				const imgView = g.addView( texture.bytes );
 				g.json.images = g.json.images ?? [];
 				g.json.images.push( { bufferView: imgView, mimeType: texture.mime } );
 				imageIndex = g.json.images.length - 1;
-				imageIndexBySourcePath.set( texInfo.pngPath, imageIndex );
+				imageIndexBySourcePath.set( imageKey, imageIndex );
 			}
 			g.json.samplers = g.json.samplers ?? [ { magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 } ];
 			g.json.textures = g.json.textures ?? [];

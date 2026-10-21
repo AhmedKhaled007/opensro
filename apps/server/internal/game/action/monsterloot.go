@@ -640,6 +640,14 @@ func (rt *Runtime) planMonsterKillLoot(
 		planned = rt.scatterMonsterDrop(planned, at, monster.Rarity())
 		admitted = append(admitted, planned)
 	}
+	// Port-only: derive pet loot from actual admitted equipment, preserving
+	// native monster tables, degrees, ranks, beta rates, capacity and level gaps.
+	for _, parent := range admitted {
+		if gear, ok := rt.preparePetGearDrop(snapshot, parent, at, now); ok {
+			gear.OwnerJID = ownerJID
+			admitted = append(admitted, rt.scatterMonsterDrop(gear, at, monster.Rarity()))
+		}
+	}
 
 	// Port-only, not native (owner 2026-10-20): with SRO_UNIQUE_POP_TICKET
 	// a unique kill leaves exactly one Magic Pop ticket. The native

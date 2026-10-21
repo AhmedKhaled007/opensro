@@ -40,6 +40,7 @@ import { collectWorldMapImageReferences } from "./worldMapImageReferences.mjs";
 import { loadQinShiTombSkillRows, qinshiTombEnabled } from "./qinshiTomb.mjs";
 import { collectGuideImageReferences } from "./guideImageReferences.mjs";
 import { mapWithConcurrency } from "./asyncUtils.mjs";
+import { buildPetItemIcons } from "./petItemIcons.mjs";
 
 // Icon copies in flight at once; each is a stat, a compare and rarely a copy.
 const ICON_COPY_CONCURRENCY = 32;
@@ -50,7 +51,7 @@ buildCifResources
 ================
 */
 export async function buildCifResources() {
-	const copiedImages = new Set();
+	const copiedImages = new Set( await buildPetItemIcons() );
 	const spriteCatalog = { resourcesByDdjPath: {} };
 	const layoutOutputDir = path.join( publicRoot, "assets", "cif", "layouts" );
 	const layoutsToBuild = await discoverCifLayouts( resinfoDir );
