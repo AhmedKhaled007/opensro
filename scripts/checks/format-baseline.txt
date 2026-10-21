@@ -119,7 +119,6 @@ apps/client-next/src/engine/foundation/rendering/star-flicker.ts
 apps/client-next/src/engine/foundation/rendering/texture-atlas.ts
 apps/client-next/src/engine/foundation/rendering/texture-motion.ts
 apps/client-next/src/engine/foundation/rendering/thunder.ts
-apps/client-next/src/engine/foundation/rendering/world-material.ts
 apps/client-next/src/engine/foundation/ui/academy-layout.ts
 apps/client-next/src/engine/foundation/ui/action-layout.ts
 apps/client-next/src/engine/foundation/ui/alchemy-selection.ts
