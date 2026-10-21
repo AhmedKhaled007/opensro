@@ -75,6 +75,10 @@ func (b ItemBody) EncodedSize() int {
 	}
 	if b.TypeFlags != 0 && IsEtcBand(b.TypeFlags) {
 		size := 4 + 2
+		if IsGoldBand(b.TypeFlags) {
+			// The gold-heap group carries a u32 amount (CSOItem 78C830).
+			size = 4 + 4
+		}
 		if EtcCarriesTradeOwner(b.TypeFlags) {
 			size += 2 + len(b.TradeOwner)
 		}
@@ -116,7 +120,11 @@ func (b ItemBody) Encode() []byte {
 		if quantity == 0 {
 			quantity = 1
 		}
-		w.U16(quantity)
+		if IsGoldBand(b.TypeFlags) {
+			w.U32(uint32(quantity))
+		} else {
+			w.U16(quantity)
+		}
 		if EtcCarriesTradeOwner(b.TypeFlags) {
 			if len(b.TradeOwner) > 65535 {
 				return nil
@@ -170,7 +178,16 @@ func readItemBody(r *Reader, typeFlags uint16) (ItemBody, error) {
 		return out, err
 	}
 	if typeFlags != 0 && IsEtcBand(typeFlags) {
-		if out.Quantity, err = r.U16(); err != nil {
+		if IsGoldBand(typeFlags) {
+			amount, e := r.U32()
+			if e != nil {
+				return out, e
+			}
+			if amount > 0xffff {
+				return out, fmt.Errorf("wire: gold-group item amount %d exceeds the stack bound", amount)
+			}
+			out.Quantity = uint16(amount)
+		} else if out.Quantity, err = r.U16(); err != nil {
 			return out, err
 		}
 		if EtcCarriesTradeOwner(typeFlags) {

@@ -5,6 +5,13 @@ cap110_monsters.py - optional, database-authored Alexandria field population.
 Port-only, not native. The supplied exports are data, never executable input.
 Main-world ordinary SD monsters and Apis join this overlay. Numeric references
 are resolved by codename; player skill identities and native records win.
+
+SRO_PHARAOH_TOMB (needs SRO_CAP110_MONSTERS) additionally admits the Pharaoh
+Tomb 1-3 monsters, database worlds 57-59, including their elite (grade 6) and
+unique (grade 8) members. They share the field overlay's character and skill
+shards and its marker, so one allocator keeps every identity stable; only the
+nests go to a file of their own (cap110-tomb.txt), which the server reads
+behind its own flag.
 ===========================================================================
 """
 import argparse
@@ -36,28 +43,57 @@ APIS_SOURCE_GRADE = 8
 # "Database export pin"). The export records this hash in summary.json.
 SOURCE_BACKUP_NAME = "SRO_VT_SHARD.bak"
 SOURCE_BACKUP_SHA256 = "b4d85a043ebce36c8704768dce0dfa63ff9418c8489241d8441b7902e28fa37a"
+TOMB_FLAG = "SRO_PHARAOH_TOMB"
+TOMB_FILE = "cap110-tomb.txt"
+FIELD_WORLD = 1
+# The three Pharaoh Tombs are database worlds of their own, but ordinary
+# outdoor regions: the port runs each as a persistent shared area.
+TOMB_WORLDS = (57, 58, 59)
+TOMB_EXTRA_GRADES = (6, 8)
+
+
+# ================
+# tomb_enabled
+# ================
+def tomb_enabled():
+	return os.environ.get(TOMB_FLAG, "").lower() in tables.FLAG_ON
 
 
 # ================
 # select_field_references
 #
 # Port-only, not native: explicitly admit Apis's source grade without
-# enabling other later uniques, dungeon populations or event variants.
+# enabling other later uniques, dungeon populations or event variants. The
+# Pharaoh Tomb codenames (tomb_codes) additionally admit elite and unique.
 # ================
-def select_field_references(later, codes):
+def select_field_references(later, codes, tomb_codes=frozenset()):
 	return {code: characters.convert_character(later[code]) for code in codes
 		if 100 <= int(later[code][57]) <= MAX_LEVEL
 		and (int(later[code][15]) == 0
-			or (code == APIS_CODENAME and int(later[code][15]) == APIS_SOURCE_GRADE))}
+			or (code == APIS_CODENAME and int(later[code][15]) == APIS_SOURCE_GRADE)
+			or (code in tomb_codes and int(later[code][15]) in TOMB_EXTRA_GRADES))}
+
+
+# ================
+# monster_codes
+#
+# The MOB_SD_ codenames the in-service spawn rows of the given worlds name.
+# ================
+def monster_codes(spawns, worlds):
+	return {r["codename"] for r in spawns
+		if r["game_world_id"] in worlds and r["service"] == 1 and r["codename"].startswith("MOB_SD_")}
 
 
 # ================
 # outdoor_regions
+#
+# The sectors of the field nests, plus the tomb nests when tomb is true.
 # ================
-def outdoor_regions(source_root):
+def outdoor_regions(source_root, tomb=False):
 	spawns = read_json(Path(source_root) / "all-spawns.json")
+	worlds = (FIELD_WORLD,) + (TOMB_WORLDS if tomb else ())
 	return {(r["region_id_unsigned"] & 255, r["region_id_unsigned"] >> 8) for r in spawns
-		if r["game_world_id"] == 1 and r["service"] == 1 and r["codename"].startswith("MOB_SD_")}
+		if r["game_world_id"] in worlds and r["service"] == 1 and r["codename"].startswith("MOB_SD_")}
 
 
 # ================
@@ -116,12 +152,20 @@ def tactics_controls(row):
 
 # ================
 # project_population
+#
+# The nest rows of the given database worlds. A world that must be complete
+# (strict, the tomb) refuses a nest whose monster was not admitted instead of
+# silently shrinking the population; the field has always skipped them.
 # ================
-def project_population(spawns, refs, tactics, hives):
+def project_population(spawns, refs, tactics, hives, worlds=(FIELD_WORLD,), strict=False):
 	rows = []
 	for spawn in sorted(spawns, key=lambda row: row["nest_id"]):
 		code = spawn["codename"]
-		if code not in refs or spawn["game_world_id"] != 1 or spawn["service"] != 1:
+		if spawn["game_world_id"] not in worlds or spawn["service"] != 1:
+			continue
+		if code not in refs:
+			if strict:
+				raise ValueError("population monster was not admitted: " + code)
 			continue
 		if any(spawn[key] != 0 for key in ("nest_flag", "hive_flag", "spawn_type")):
 			raise ValueError("unsupported field spawn flags: " + code)
@@ -171,6 +215,24 @@ def allocate_identities(occupied, codes, previous):
 		identities[code] = next_id
 		next_id += 1
 	return identities
+
+
+# ================
+# add_native_client_skills
+#
+# A monster may use a basic skill (SKILL_PUNCH_01) the database projection
+# does not list because it is not monster-specific. When the later client's own
+# row for that ID names a native skill, it joins by codename and the native
+# record wins. Anything else stays missing, and merge_skills refuses it.
+# load_client reads the later client's skill rows by ID, and only when needed.
+# ================
+def add_native_client_skills(source, needed, native, load_client):
+	missing = sorted(set(needed) - {int(row[1]) for row in source})
+	if not missing:
+		return source
+	native_codes = {row[3] for row in native if row[0] == "1"}
+	client = load_client()
+	return source + [client[identity] for identity in missing if identity in client and client[identity][3] in native_codes]
 
 
 # ================
@@ -227,7 +289,13 @@ def add_monsters(vsro_root, native, output, source_root=None):
 	marker = output / MARKER
 	prior = read_json(marker) if marker.exists() else {}
 	text_root = output / TEXT_ROOT
-	if os.environ.get(FLAG, "").lower() not in tables.FLAG_ON:
+	tomb = tomb_enabled()
+	field = os.environ.get(FLAG, "").lower() in tables.FLAG_ON
+	if tomb and not field:
+		# The tomb's equipment drops come from the cap-110 loot catalogue the
+		# field flag builds, so the server refuses it without the field too.
+		raise ValueError(f"{TOMB_FLAG} requires {FLAG}")
+	if not field:
 		if prior:
 			effect_path = text_root / "skilleffect.txt"
 			effect_text = effects.remove_animation_bases(tables.decode_table(effect_path.read_bytes()), set(prior.get("animationBases", [])))
@@ -244,7 +312,7 @@ def add_monsters(vsro_root, native, output, source_root=None):
 			text_path = text_root / "textdataname.txt"
 			owned_names = set(prior.get("nameSymbols", []))
 			write_atomically(text_path, encode_rows([r for r in characters.translation_rows(text_path.read_bytes()) if len(r) < 2 or r[1] not in owned_names]))
-		for name in (CHARACTER_SHARD, SKILL_SHARD, POPULATION_FILE, "cap110-equipment.txt"):
+		for name in (CHARACTER_SHARD, SKILL_SHARD, POPULATION_FILE, TOMB_FILE, "cap110-equipment.txt"):
 			(text_root / name).unlink(missing_ok=True)
 		manifest = text_root / "skilldata.txt"
 		if manifest.exists():
@@ -268,8 +336,9 @@ def add_monsters(vsro_root, native, output, source_root=None):
 		def read(name):
 			return tables.table_text(media, index, name.lower())
 		later = {row[2]: row for shard in tables.table_rows(read("characterdata.txt")) for row in tables.table_rows(read(shard[0]))}
-		codes = {r["codename"] for r in spawns if r["game_world_id"] == 1 and r["service"] == 1 and r["codename"].startswith("MOB_SD_")}
-		refs = select_field_references(later, codes)
+		tomb_codes = monster_codes(spawns, TOMB_WORLDS) if tomb else set()
+		codes = monster_codes(spawns, (FIELD_WORLD,)) | tomb_codes
+		refs = select_field_references(later, codes, tomb_codes)
 		if not refs:
 			raise ValueError("no ordinary level 100-110 Alexandria field monsters")
 		native_chars = [r for p in text_root.glob("characterdata_*.txt") if p.name != CHARACTER_SHARD for r in tables.table_rows(p.read_bytes())]
@@ -278,16 +347,31 @@ def add_monsters(vsro_root, native, output, source_root=None):
 		for code, row in sorted(refs.items()):
 			row[1] = str(allocated[code])
 		native_skills = [r for p in text_root.glob("skilldata_*.txt") if p.name != SKILL_SHARD for r in tables.table_rows(p.read_bytes()) if len(r) == 118]
-		added, skill_map = merge_skills(native_skills, source_skills, {int(s) for r in refs.values() for s in r[89:99] if int(s)}, prior.get("skills", {}))
+		needed = {int(s) for r in refs.values() for s in r[89:99] if int(s)}
+		# ================
+		# load_client_skills
+		# ================
+		def load_client_skills():
+			return {int(r[1]): r for shard in tables.table_rows(read("skilldata.txt"))
+				for r in tables.table_rows(read(shard[0])) if len(r) > 3 and r[1].isdigit()}
+		source_skills = add_native_client_skills(source_skills, needed, native_skills, load_client_skills)
+		added, skill_map = merge_skills(native_skills, source_skills, needed, prior.get("skills", {}))
 		for row in refs.values():
 			row[89:99] = [str(skill_map[int(s)]) if int(s) else "0" for s in row[89:99]]
 		population = project_population(spawns, refs, tactics, hives)
-		write_atomically(text_root / CHARACTER_SHARD, encode_rows(list(refs.values())))
+		tomb_population = project_population(spawns, refs, tactics, hives, TOMB_WORLDS, strict=True) if tomb else None
+		# Sorted by identity: the codename set has no stable order, and a
+		# rebuild should write the same bytes.
+		write_atomically(text_root / CHARACTER_SHARD, encode_rows(sorted(refs.values(), key=lambda row: int(row[1]))))
 		write_atomically(text_root / SKILL_SHARD, encode_rows(added))
 		manifest = tables.table_rows((text_root / "skilldata.txt").read_bytes())
 		manifest = [r for r in manifest if r[0].lower() != SKILL_SHARD] + [[SKILL_SHARD]]
 		write_atomically(text_root / "skilldata.txt", encode_rows(manifest))
 		write_atomically(text_root / POPULATION_FILE, (json.dumps(population) + "\n").encode())
+		if tomb:
+			write_atomically(text_root / TOMB_FILE, (json.dumps(tomb_population) + "\n").encode())
+		else:
+			(text_root / TOMB_FILE).unlink(missing_ok=True)
 		base_text = (text_root / "textdataname.txt").read_bytes()
 		known = {r[1] for r in characters.translation_rows(base_text) if len(r) > 1}
 		wanted = {r[5] for r in refs.values()} - known
@@ -314,6 +398,8 @@ def add_monsters(vsro_root, native, output, source_root=None):
 			"characterInfo": sorted(set(prior.get("characterInfo", [])) | {r[0] for r in info}),
 			"nameSymbols": sorted(set(prior.get("nameSymbols", [])) | {r[1] for r in texts})}
 		summary["equipmentLootRows"] = loot_count
+		summary["tombNests"] = len(tomb_population["Rows"]) if tomb else 0
+		summary["tombRegions"] = sorted({r["RegionID"] for r in tomb_population["Rows"]}) if tomb else []
 		summary["sourceBackupSha256"] = read_json(source_root / "summary.json")["backup_sha256"]
 		summary["snapshotHashes"] = {name: sro_pk2.digest((source_root / name).read_bytes()) for name in (
 			"all-spawns.json", "Tab_RefNest.json", "Tab_RefTactics.json", "Tab_RefHive.json",

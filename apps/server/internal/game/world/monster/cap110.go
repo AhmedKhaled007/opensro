@@ -4,6 +4,9 @@ cap110.go - optional Alexandria field nests from the verified projection.
 
 Port-only, not native. SRO_CAP110_MONSTERS is off by default. The compiler
 joins database identities by codename; runtime resolves the installed refs.
+The nest validation is shared with the Pharaoh Tomb population
+(pharaoh_tomb.go): both read the same row schema and differ only in which
+monster references they admit.
 ===========================================================================
 */
 package monster
@@ -24,6 +27,12 @@ import (
 const EnvCap110Monsters = "SRO_CAP110_MONSTERS"
 const cap110PopulationFile = "cap110-monsters.txt"
 const cap110PopulationVersion = 1
+
+// Port-only, not native: the optional expansion's monster level window.
+const (
+	cap110FirstLevel = 100
+	cap110LastLevel  = 110
+)
 
 /*
 ================
@@ -86,6 +95,35 @@ appendCap110Data
 ================
 */
 func appendCap110Data(template Template, data []byte) (Template, error) {
+	return appendNests(template, data, "cap110 population", admitCap110Field)
+}
+
+/*
+================
+admitCap110Field
+
+Port-only, not native: Apis retains source grade 8; other later special
+monsters remain outside the optional outdoor population.
+================
+*/
+func admitCap110Field(ref MonsterRef, codename string) bool {
+	const apisSourceGrade = 8
+	apis := codename == "MOB_SD_APIS" && ref.MonsterType == apisSourceGrade
+	return strings.HasPrefix(codename, "MOB_SD_") && ref.Level >= cap110FirstLevel && ref.Level <= cap110LastLevel &&
+		(ref.MonsterType == 0 || apis)
+}
+
+/*
+================
+appendNests
+
+Validates one optional population file and appends its nests onto a copy of
+the template. label names the population in errors; admit says which installed
+monster references the population may spawn. Every row must pass: a partial
+population must not reach gameplay.
+================
+*/
+func appendNests(template Template, data []byte, label string, admit func(MonsterRef, string) bool) (Template, error) {
 	var source struct {
 		Version int
 		Rows    []cap110Nest
@@ -93,13 +131,13 @@ func appendCap110Data(template Template, data []byte) (Template, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&source); err != nil {
-		return Template{}, fmt.Errorf("cap110 population: %w", err)
+		return Template{}, fmt.Errorf("%s: %w", label, err)
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		return Template{}, fmt.Errorf("cap110 population has trailing data")
+		return Template{}, fmt.Errorf("%s has trailing data", label)
 	}
 	if source.Version != cap110PopulationVersion || len(source.Rows) == 0 {
-		return Template{}, fmt.Errorf("cap110 population has invalid version or no nests")
+		return Template{}, fmt.Errorf("%s has invalid version or no nests", label)
 	}
 	refs := make(map[string]MonsterRef, len(template.Refs))
 	for _, ref := range template.Refs {
@@ -109,26 +147,22 @@ func appendCap110Data(template Template, data []byte) (Template, error) {
 	seen := make(map[uint32]bool, len(source.Rows))
 	for _, row := range source.Rows {
 		ref, ok := refs[row.Codename]
-		// Port-only, not native: Apis retains source grade 8; other later
-		// special monsters remain outside the optional outdoor population.
-		const apisSourceGrade = 8
-		apis := row.Codename == "MOB_SD_APIS" && ref.MonsterType == apisSourceGrade
-		if !ok || !strings.HasPrefix(row.Codename, "MOB_SD_") || ref.Level < 100 || ref.Level > 110 || (ref.MonsterType != 0 && !apis) {
-			return Template{}, fmt.Errorf("cap110 population has invalid field reference %q", row.Codename)
+		if !ok || !admit(ref, row.Codename) {
+			return Template{}, fmt.Errorf("%s has invalid field reference %q", label, row.Codename)
 		}
 		if row.NestID == 0 || seen[row.NestID] || row.RegionID&0x8000 != 0 || row.MaxCount < 0 || row.MaxCount > math.MaxUint16 ||
 			row.RespawnDelayMinSec < 0 || row.RespawnDelayMaxSec < row.RespawnDelayMinSec ||
 			row.ChampionGenPercentage < 0 || row.ChampionGenPercentage > 100 || row.Controls.ChangeTarget > 2 {
-			return Template{}, fmt.Errorf("cap110 population has invalid nest %d", row.NestID)
+			return Template{}, fmt.Errorf("%s has invalid nest %d", label, row.NestID)
 		}
 		for _, value := range []float64{row.X, row.Y, row.Z, row.Radius, row.GenerateRadius} {
 			if math.IsNaN(value) || math.IsInf(value, 0) {
-				return Template{}, fmt.Errorf("cap110 population has nonfinite nest %d", row.NestID)
+				return Template{}, fmt.Errorf("%s has nonfinite nest %d", label, row.NestID)
 			}
 		}
 		if row.Radius < 0 || row.GenerateRadius < 0 || row.Controls.SightRange < 0 ||
 			(row.Champion != nil) != (row.Controls.ChampionID != 0) {
-			return Template{}, fmt.Errorf("cap110 population has inconsistent tactics %d", row.NestID)
+			return Template{}, fmt.Errorf("%s has inconsistent tactics %d", label, row.NestID)
 		}
 		seen[row.NestID] = true
 		nest := NestRow{

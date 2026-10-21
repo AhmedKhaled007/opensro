@@ -162,6 +162,20 @@ variable "cap110_monsters" {
   default = "off"
 }
 
+# Port-only, not native: the optional Pharaoh Tomb 1-3 population. It needs
+# cap110_monsters on as well; GameWorld refuses to start otherwise.
+variable "pharaoh_tomb" {
+  type    = string
+  default = "off"
+}
+
+# Port-only, not native: a Pharaoh Tomb elite or unique rolls its equipment
+# this many times as often. "1" is native; "2" to "20" raises it.
+variable "pharaoh_tomb_gear_rate" {
+  type    = string
+  default = "1"
+}
+
 # beta_silk is the silk one in-world hour earns into the account's real Item
 # Mall wallet (BUG-062, port-only): earning pauses at 1500, and a new account
 # starts with 300. Earned silk is REAL and survives "off", which only stops
@@ -907,6 +921,8 @@ job "sro-gameworld-__SHARD_ID__" {
         SRO_BETA_MASTERY                        = var.beta_mastery
         SRO_LEVEL_CAP                      = var.level_cap
         SRO_CAP110_MONSTERS                = var.cap110_monsters
+        SRO_PHARAOH_TOMB                   = var.pharaoh_tomb
+        SRO_PHARAOH_TOMB_GEAR_RATE         = var.pharaoh_tomb_gear_rate
         SRO_BETA_SILK                           = var.beta_silk
         SRO_MAINTENANCE_GATE_PATH               = var.maintenance_gate_path
         SRO_PET_PACING                          = var.pet_pacing

@@ -82,6 +82,18 @@ GATE_CODES = (
 	"GATE_SD1", "GATE_SD2", "GATE_NPC_SD_M_AREA_FERRY",
 	"GATE_DELTA_GATE_E", "GATE_DELTA_GATE_W", "GATE_STORMDESERT_GATE", "GATE_KINGSVALLEY_GATE"
 )
+# Port-only, not native: the Pharaoh Tomb's gates, added with SRO_PHARAOH_TOMB.
+# The one entrance in Kings Valley links to the three tomb exits. The source's
+# GATE_TOMBOSIRIS_* rows have no position and are not carried.
+TOMB_GATE_CODES = (
+	"GATE_TOMB_GATE_IN", "GATE_TOMB_GATE_OUT_1", "GATE_TOMB_GATE_OUT_2", "GATE_TOMB_GATE_OUT_3"
+)
+# The last teleportdata column names the destination game world. The source's
+# tomb exits name worlds 57-59, one per tomb, which the v1.150 world table does
+# not define. The port runs every tomb in the persistent world (as the Qin-Shi
+# tomb's teleport rows do), so the column becomes 1 and the original is reported.
+TELEPORT_WORLD_COLUMN = 12
+PERSISTENT_WORLD = "1"
 # The v1.150 server's level cap (levels.json levelCap). The VSRO links need
 # level 95 for a cap of 110; clamped here so the city stays reachable.
 NATIVE_LEVEL_CAP = 90
@@ -302,7 +314,13 @@ def merge_gate_tables(native, vsro, codes=GATE_CODES, level_cap=NATIVE_LEVEL_CAP
 		raise SystemExit("a VSRO gate id is already a native teleport id")
 	ids = {vsro_id: native_ids.get(code, vsro_id) for vsro_id, code in vsro_codes.items()}
 
-	data_rows = [vsro_gates[code] for code in codes]
+	data_rows, flattened = [], {}
+	for code in codes:
+		row = list(vsro_gates[code])
+		if code in TOMB_GATE_CODES and row[TELEPORT_WORLD_COLUMN] != PERSISTENT_WORLD:
+			flattened[code] = row[TELEPORT_WORLD_COLUMN]
+			row[TELEPORT_WORLD_COLUMN] = PERSISTENT_WORLD
+		data_rows.append(row)
 	building_ids = {row[3] for row in data_rows}
 	buildings = [
 		row for row in stage1.table_rows(vsro["teleportbuilding.txt"])
@@ -331,7 +349,8 @@ def merge_gate_tables(native, vsro, codes=GATE_CODES, level_cap=NATIVE_LEVEL_CAP
 	}, {
 		"gates": list(codes), "links": len(links), "buildings": len(buildings), "texts": len(text_rows),
 		# The server hides these structures while SRO_ALEXANDRIA is off (alexandria.go).
-		"buildingCodes": sorted(row[2] for row in buildings)
+		"buildingCodes": sorted(row[2] for row in buildings),
+		**({"worldsFlattened": flattened} if flattened else {})
 	}
 
 
@@ -575,6 +594,9 @@ def build_variant(vsro_root, native, variant, imported_root=None):
 	skill_animation = add_skill_effects(vsro_root, native, out)
 	from cap110_monsters import add_monsters
 	field_monsters = add_monsters(vsro_root, native, out)
+	# The monsters' own database rewards follow the population they describe.
+	from cap110_rewards import add_rewards
+	monster_rewards = add_rewards(vsro_root, native, out)
 	from alexandria_npc_services import add_services
 	city_services = add_services(vsro_root, native, out)
 
@@ -583,6 +605,7 @@ def build_variant(vsro_root, native, variant, imported_root=None):
 
 	manifest = {
 		"fieldMonsters": field_monsters,
+		"monsterRewards": monster_rewards,
 		"format": "opensro-alexandria-variant-v1",
 		"portOnly": True,
 		"regions": stage_manifest["regions"],
@@ -635,7 +658,9 @@ def add_gates(vsro_root, native, out):
 	tables["text"] = (native / textdata / "textdataname.txt").read_bytes()
 	vsro = {name: read_vsro_file(vsro_root, "Media", TEXTDATA + name) for name in names}
 	vsro["text"] = read_vsro_file(vsro_root, "Media", TEXTDATA + "textdata_object.txt")
-	merged, summary = merge_gate_tables(tables, vsro, level_cap=level_cap)
+	from cap110_monsters import tomb_enabled
+	codes = GATE_CODES + TOMB_GATE_CODES if tomb_enabled() else GATE_CODES
+	merged, summary = merge_gate_tables(tables, vsro, codes=codes, level_cap=level_cap)
 	for name, content in merged.items():
 		replace_file(out / textdata / ("textdataname.txt" if name == "text" else name), content)
 	return summary, merged

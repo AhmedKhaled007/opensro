@@ -334,8 +334,9 @@ def import_alexandria(vsro_root, extracted):
 		# Empty connecting terrain and mountain sectors have no monster nests.
 		fields = set()
 		if os.environ.get("SRO_CAP110_MONSTERS", "").lower() in FLAG_ON:
-			from cap110_monsters import outdoor_regions, SOURCE_ENV
-			fields = outdoor_regions(os.environ[SOURCE_ENV])
+			from cap110_monsters import outdoor_regions, SOURCE_ENV, tomb_enabled
+			# The Pharaoh Tomb regions seed their own components the same way.
+			fields = outdoor_regions(os.environ[SOURCE_ENV], tomb_enabled())
 		regions = connected_regions(city, vsro_only_regions(data_data, data_index, extracted), fields)
 		log(f"{len(city)} city regions, {len(regions)} regions with the fields around it")
 

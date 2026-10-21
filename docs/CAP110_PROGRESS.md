@@ -584,6 +584,97 @@ Upstream review preparation is recorded in `docs/CAP110_UPSTREAM_HANDOFF.md`.
 The expansion remains optional; monster/drop progression and cave stability
 remain separate work before a complete cap-110 release.
 
+## Field monsters deployed, 2026-10-17
+
+The database-authored Alexandria field population is staged and live behind
+`SRO_CAP110_MONSTERS` (default off): 29 monster types, 1,519 nests, 80 monster
+skills and the database equipment-drop catalog through level 110. The variant
+manifest lists the characters, skills, nests, regions and the source-backup
+hash for each input.
+
+The asset build published 29,431 skilldata rows from 9 shards, 27,147 skill
+effect records, 1,903 mission NPC/monster entries with 20 new VATs, and 40,913
+assets in 248 packs (browser manifest `696c4ec22e9e`). The server game-data
+export wrote 4,250 files with manifest
+`sha256:fd0042fe3ca9a2897c5f9336856033728b281d0b9b4d28e1c614c3906835181f`.
+
+The fleet was redeployed from the saved pre-stop job flags with
+`SRO_CAP110_MONSTERS=on` and `SRO_LEVEL_CAP=110`: Agent version 19 and
+GameWorld version 25, both 1/1 healthy, readiness 200 on the Agent and the
+GameWorld transport.
+
+Verification: 180 Python tests passed, plus the loot, monster, sro-gameworld
+and shardsettings Go packages. Not verified: any in-game spawn, combat, drop or
+progression check, and the three monster EasyFX programs the build flagged as
+non-v11 version 13 (it continued rather than guess their layout).
+
+## Apis spawn check, 2026-10-17
+
+The owner GM-spawned `MOB_SD_APIS` (character reference 26859, skills 33521 to
+33525) through the console in the Holy Water Temple. It renders at its authored
+scale and grade, with its model, materials and horn-flame effect intact.
+
+Combat, its five skills and its drops remain unverified. The earlier staging
+collision is fixed: the importer now reserves every retained monster identity
+before allocating new ones. 188 Python tests and the monster and loot Go
+packages pass.
+
+## Owner field test and commit review, 2026-10-17
+
+The owner reports successful botting against level-101 field monsters, including
+equipment and gold drops, with no observed problem. This supersedes the pending
+in-game check above for that tested slice; levels 102-110 and every monster's
+effects, numerical rewards and rare drops are not exhaustively certified.
+
+Reviewed commits `c4347c9e`, `d48bb641` and `8c1ea61f`. Live Agent and GameWorld
+readiness both returned 200. The installed population has 29 types and 1,519
+nests; the import marker contains 78 added skill rows, correcting the earlier
+80-skill summary. Five Go packages and 40 cap-110 Python tests passed in this
+review. No gameplay implementation was changed during review.
+
+Two follow-ups were identified (both resolved below):
+
+- `cap110_monsters.merge_skills` does not reserve all previous target IDs before
+  allocating new ones. Replaying the real snapshot with Apis's attack references
+  added to the ordinary field set fails with `monster skill identity collision:
+  MSKILL_SD_UNEG_ATTACK01`. Existing deployments work; extending the import can
+  fail. Reserve retained identities before allocating new skills and characters.
+- `sro-catalogue` still calls `monster.LoadTemplate` without `AppendCap110`, and
+  does not initialize the optional loot catalog. Regenerated public monster/drop
+  data therefore does not describe the expanded live shard. Reuse the same
+  optional startup loaders before building those catalogue projections.
+
+The F3 GM item picker is planned in `GM_ITEM_PICKER.md`, not implemented. Caves
+and Rogue Sable Duplicate remain deferred by the owner.
+
+## Import identity and catalogue fixes, 2026-10-17
+
+The monster importer now reserves every published character and skill identity
+before assigning additions, including identities absent from the selected set.
+Invalid or colliding marker identities fail explicitly. Replaying the actual
+Apis extension now retains all 78 published skill IDs and adds five dependency
+rows without a collision. This was a read-only replay; Apis was not added to the
+live population.
+
+The catalogue command now initializes optional equipment loot and appends the
+optional monster population using the same loaders and flag as GameWorld.
+Its setting defaults to off. Actual CLI exports verified 29 expansion types
+with regions when on (212 total monsters), versus none when off (183 total).
+The level-101 table contains 94 normal and 200 rare equipment entries with
+positive probabilities, including degree-11 equipment; that table is absent
+with the expansion off. Verification output lives in the ignored
+`.state/cap110-review/catalogue-{on,off}` directories, not the published site.
+
+Verification: 42 cap-110 Python tests and the catalogue, shardsettings,
+catalogue projection, loot and monster Go packages passed. Script typechecking,
+formatting, source encoding, generated-root and source-size checks passed.
+The first attempt to batch task names failed with `TS5042: Option 'project'
+cannot be mixed with source files on a command line`; rerunning each task
+separately passed. No live server, character or licensed data was modified.
+The full `pnpm task check:server` gate failed its race step with
+`go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`. This shell has
+CGO disabled and no GCC on PATH; the full gate is not reported as passing.
+
 ## Outdoor Alexandria dimensional gates, 2026-10-17
 
 Restored four source-authored teleport buildings and four directed links in
@@ -824,7 +915,47 @@ tests and 67 Alexandria Python tests passed. Scripts, size, formatting,
 encoding and diff checks passed. Reload the browser to replace the failed
 session's older map table.
 
-## Field monsters: the grade-8 target gauge, 2026-10-21
+### 2026-10-17: repair Apis target HP gauge
+
+Owner confirmed Apis appears, then reported an empty target HP bar. Reviewed
+DeepSeek commits `2e8d27b9` and `ce7a2c8a`: initializing current HP and logging
+the inputs did not address `monsterMaximumHp` returning undefined for grade
+8. The target renderer consequently omitted the gauge even with valid HP.
+
+HP calculation now uses the reference base for grades without an authored
+grade icon/title, matching the server's existing `EffectiveMaxHP` default
+arm. Icon/title handling remains independent. The idle-HP initialization
+now lives beside the effective maximum in `targetStatus`, so champions,
+giants and party monsters also start full rather than dividing base HP by
+a promoted maximum. Real current HP, including zero, always takes priority.
+Removed the temporary target debug state and logging from the UI owner.
+
+Eight target/compact-target tests passed, including Apis at full, half and
+zero HP, idle promoted monsters, and unknown maximum HP. Formatting,
+encoding and diff checks passed; TypeScript typecheck passed. HTTP port
+5380 serves the updated target module. No asset rebuild or service restart
+is required for this source-only change.
+
+The full client check completed with four failing gates: runtime tests,
+ownership, item-sounds and audio audit. It ran 577 test files, with 11 files
+failing on expanded catalogue counts and an effect decoder issue
+(`Unsupported particle rotation assignment` for
+`hiteffect/hit_4_cold_hit_e.efp`). Representative census failures include
+`29436 !== 27835` skills and `105 !== 85` portal links. Ownership reports
+`world-map.ts: shared module state must be an immutable scalar constant`;
+item sounds reports `ITEM sound catalog drift`, and the audio audit reports
+`item-catalog-drift`. Those owners/assets were not changed by this HP fix.
+Typecheck, test types, execution, capabilities, delivery, layout and retail
+panels passed. The full client gate is not green; no exhaustive live fight
+was run for the gauge repair.
+
+The owner confirmed the HP gauge now renders, then reported the missing
+Unique title/icon. Added a port-only grade-8 presentation entry using the
+existing Unique text and icon; Apis's source grade and HP stay unchanged.
+The source hive 584 describes Apis as a unique, while the imported record
+retains grade 8. All eight target/compact-target tests passed with explicit
+grade-8 icon/title assertions. The packed English `Unique` label and icon
+were verified present, and port 5380 serves the updated target module.
 
 **Root cause and review (2026-10-21):** the server already sends the monster's
 current HP when it is selected (0xB45A, `EncodeMonsterObjectSelectResult`), and
@@ -835,6 +966,144 @@ So the only client change is the grade-8 entry (unique title, icon, x1 HP). No
 removed because the native client reads HP from the server (it has no such
 default), and the entry is unreachable on a native build (native monster
 references are grades 0 and 3; nests add 1, 4, 5 and 6; none is 8).
+
+## Pharaoh Tomb 1-3 (SRO_PHARAOH_TOMB), 2026-10-20
+
+Port-only, not native; off by default; needs `SRO_CAP110_MONSTERS` (its equipment
+drops come from the cap-110 loot catalogue) and refuses to start without it.
+
+Kings Valley has one dimensional gate, `GATE_TOMB_GATE_IN`, linked both ways and
+free to three tomb exits, `GATE_TOMB_GATE_OUT_1..3` (Beginner, Intermediate,
+Advanced). The later server's database holds the tombs as game worlds 57, 58
+and 59 (30 nests each, 17 monster types each, levels 100-110, with the
+Sphinx, Sekhmet, Osiris, Horus and Nephthys bosses). Unlike the Donwhang cave or
+the Qin-Shi floors they are ordinary outdoor regions (all 90 nests and the three
+gate arrivals have no dungeon-region sign bit), so they reuse the field pipeline.
+
+Port decisions, each inferred rather than evidenced:
+
+- Each tomb runs as a persistent shared area on `INS_DEFAULT`, as the Qin-Shi
+  tomb does. The original's per-tomb worlds are not modelled. The last
+  `teleportdata` column names the destination world; the v1.150 world table has
+  no 57-59 (the server stops with `names unknown world 57`), so the importer sets
+  the three exits to world 1 and records the originals in the variant manifest
+  (`gates.worldsFlattened`).
+- Bosses are single-spawn nests with their authored respawn delay. The database
+  carries no trigger data, so the original's instance triggers are not ported.
+- The unplaced `GATE_TOMBOSIRIS_*` rows (all-zero positions) are not carried.
+
+Implementation: `scripts/cap110_monsters.py` admits worlds 57-59 and grades 6
+(elite) and 8 (unique) when the flag is on, sharing the field overlay's character
+and skill shards and marker so one allocator keeps every identity stable; nests
+go to `cap110-tomb.txt`. Two basic skills the database projection omits
+(`SKILL_PUNCH_01`, `SKILL_CH_SWORD_SMASH_A_01`) join native skills by codename
+through the later client's own rows; no database export was needed. Tomb nest
+regions seed the terrain import (+120 regions, 334 -> 454); the tile remap is
+unchanged. `scripts/build_alexandria_variant.py` adds the four gates. The server
+side is `monster/pharaoh_tomb.go` (`AppendPharaohTomb`), sharing the nest
+validation in `cap110.go`, with the flag in `shardsettings.go`, the Nomad job,
+`devdeps.go`, the catalogue tool and the public rules list.
+
+New check: `scripts/analysis/check_identity_parity.py` joins the client's and the
+server's characterdata, skilldata and itemdata by codename and fails on any
+differing ID or one-sided codename. Run it after every import and server export.
+The Weneg-drawn-as-serpent bug was exactly this drift: the Oct 19 variant rebuild
+allocated the field monsters from scratch while the server data was the Oct 17
+export. Identity retention depends on `extracted/.opensro-cap110-monsters.json`
+surviving a rebuild.
+
+Verified on this machine: 10 monster and 30 variant Python tests, the monster,
+loot, shardsettings, catalogue, nomad and gameworld Go packages, a throwaway
+real-data load through the production Go loader (90 nests, 39 regions, grades
+25/50/15 by nest), the identity check (0 differences in all three tables), the
+delivered packs (51 monster IDs match the server and every model is delivered;
+the gate links; navigation for all 120 added regions; 14,596 object material
+groups admitted with 0 failures), and a healthy Agent and GameWorld with 10,389
+nest rows (10,299 + 90). Formatting and encoding gates pass.
+
+Owner report, 2026-10-20: all portals work in game (the two outdoor gate pairs
+and the tomb gates). This covers travel only, not what is inside the tombs.
+
+Not verified: any in-game spawn, combat, boss respawn or drop in
+the tombs; the visual result of five new models baked to float16 (max error
+0.016-0.031, warned above 0.01, float32 kept above 0.05); two new version-13
+effects (`skill_khepri_ac3_powder_shot`, `skill_horus_ac4_ready`) that the
+parser accepts with its "verify layout" warning (Apis's version-13 head flame
+rendered correctly in game); level-100 tomb monsters and non-equipment drops
+(the equipment catalogue covers levels 101-110); `pnpm check` and the full
+client check.
+
+## Monster rewards and tomb gear rate, 2026-10-21
+
+The owner reported that tomb uniques dropped only potions, pills, gold and one
+piece of gear. Cause: the loot catalogue treats the native v1.150 client as its
+content boundary, so every reward rule of a monster the native client lacks was
+recorded as excluded (`absent-client-monster` in `scripts/data/loot/*-rewards-source.json`).
+The Alexandria field monsters, Apis and the 51 tomb monsters therefore had no
+assigned rewards at all, and the website catalogue showed empty drop lists for
+them.
+
+What the database holds for them (`_RefMonster_AssignedItemDrop`,
+`_RefMonster_AssignedItemRndDrop`, `_RefDropItemGroup`, exported read-only by
+`.state/vsro-database/export_assigned_rewards.py`): 162 fixed rules, which are
+monster-specific alchemy materials (`ITEM_ETC_ARCHEMY_MATERIAL_SD_<MONSTER>1/2`,
+3.8% on ordinary monsters, 41.6% and 20.8% on the tomb bosses and Apis), and 30
+random rules over two single-item groups, the SD tokens (`ITEM_ETC_SD_TOKEN_01`
+and `_03`, 12% for most of the 15 monsters that have them, 20% for Osiris 3).
+None are gear. The database's gear odds are only the level class tables
+(about 0.04% normal and 0.3-0.43% rare per roll at levels 105-110, all
+degree 11), which is why tomb gear is rare by design.
+
+Implementation: `scripts/cap110_rewards.py` (run by the variant build after the
+monsters) imports the 96 items these rules name that the native table lacks (94
+materials, 2 tokens) as shard `itemdata_110001.txt` with retained identities
+from 42770, their names, and the few asset files they need (both token icons and
+`drop_token.bsr`), and writes `cap110-rewards.txt`. Group ids are offset by
+1,000,000 so they never meet a native group. The server reads it in
+`loot.InitCap110` (`loot/cap110_rewards.go`), joining onto the pristine native
+catalogue; it refuses a rule that names a native monster or group. Rewards ride
+`SRO_CAP110_MONSTERS`; the file is required when that flag is on.
+
+Port-only gear boost: `SRO_PHARAOH_TOMB_GEAR_RATE` (1 is native, 2 to 20; unset
+is 1) multiplies the equipment rolls of tomb elites (grade 6) and uniques
+(grade 8): the unique prepass equipment count and the ordinary equipment passes.
+The rate is stamped on the tomb monsters' references when the tomb loads
+(`MonsterRef.PharaohGearRate`), so no other monster is affected. The website's
+drop lists describe the native rule. The local stack runs it at 5.
+
+Important interaction: `SRO_ALCHEMY_MATERIAL_DROPS_OFF` (owner, 2026-10-14) is
+on, and `prepareSelectedDrop` discards every type 3/3/11/4 item, assigned drops
+included. While it is on, the 94 imported materials never drop; only the tokens
+do. Turning the flag off would also bring back the old grey-bag junk everywhere.
+
+Verified: 6 + 10 + 4 Python tests (rewards, monsters, identity), the loot, monster,
+action, enterworld, shardsettings, catalogue, nomad and gameworld Go packages
+(loot tests include a repeatable `InitCap110` and refusals), a real-data load
+and a 200,000-kill simulation of `AssignedDrops` that reproduced the authored
+rates (Sphinx materials 41.4% and 20.9%, tokens 12%; Osiris 3 tokens 0.4 per
+kill; ordinary monsters 3.8%), the delivered packs (all 96 items have a name,
+icon and drop model), identity parity (0 differences in characters, skills and
+items), and the source gates: scripts, scripts-tests, typecheck, formatting,
+encoding, size, generated-root, loot-catalog, compiled-quests, shared-fixtures,
+console, release, client-preparation and pipeline-contracts. The server race
+step cannot run here (`go: -race requires cgo`, no C compiler).
+
+Not verified: any in-game drop. Whether `ITEM_ETC_SD_TOKEN_*` (type 3/3/5/1, no
+native item of that kind) picks up, stacks and shows correctly; whether anything
+in the variant accepts tokens; and the effect of the gear rate on real kills.
+The token descriptions are absent in both clients and stay absent.
+
+### 2026-10-21: SD token pickup ended the session
+
+Picking up `ITEM_ETC_SD_TOKEN_01` (TID 3/3/5/1) failed with "A game error
+interrupted your session" (Agent log: `Truncated inventory item`, opcode
+0xB06D). TID3 5 is the gold-heap group: native holds only `ITEM_ETC_GOLD_01..03`
+(3/3/5/0) there, and `CSOItem` 78C830 reads a u32 amount for that group while
+every other ETC group has a u16 stack count. The server wrote the u16 body for
+all ETC rows. `ItemBody` now writes and reads the u32 amount for the gold
+group; other groups are unchanged (`TestGoldGroupItemBodyCarriesU32Quantity`,
+`TestOtherEtcGroupsKeepU16Quantity`). Gold never travels as an inventory item
+natively, so native flows do not reach this branch.
 
 ## Database export pin, 2026-10-21
 

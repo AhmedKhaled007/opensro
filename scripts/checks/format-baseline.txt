@@ -68,7 +68,6 @@ apps/client-next/src/engine/foundation/gameplay/equipment-drop.ts
 apps/client-next/src/engine/foundation/gameplay/event-environment.ts
 apps/client-next/src/engine/foundation/gameplay/feedback-levels.ts
 apps/client-next/src/engine/foundation/gameplay/game-options.ts
-apps/client-next/src/engine/foundation/gameplay/ground-item.ts
 apps/client-next/src/engine/foundation/gameplay/guide.ts
 apps/client-next/src/engine/foundation/gameplay/hunting.ts
 apps/client-next/src/engine/foundation/gameplay/inventory-notices.ts
@@ -131,7 +130,6 @@ apps/client-next/src/engine/foundation/ui/damage-text.ts
 apps/client-next/src/engine/foundation/ui/disconnect-dialog.ts
 apps/client-next/src/engine/foundation/ui/extended-quickslot.ts
 apps/client-next/src/engine/foundation/ui/frame-ring.ts
-apps/client-next/src/engine/foundation/ui/ground-item-label.ts
 apps/client-next/src/engine/foundation/ui/guide-catalog.ts
 apps/client-next/src/engine/foundation/ui/guild-crest.ts
 apps/client-next/src/engine/foundation/ui/hit-test.ts

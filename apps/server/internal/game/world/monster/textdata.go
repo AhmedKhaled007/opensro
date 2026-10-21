@@ -55,6 +55,11 @@ type MonsterRef struct {
 	TidWord uint16
 	// Structure is a fortress structure (structureTidGate).
 	Structure bool
+	// PharaohGearRate is the equipment multiplier of a Pharaoh Tomb monster
+	// (pharaoh_tomb.go; port-only, not native). Only AppendPharaohTomb sets
+	// it, from SRO_PHARAOH_TOMB_GEAR_RATE; 0 is every other monster, and 1 the
+	// native rate.
+	PharaohGearRate uint8
 	// CostRepair and CostRevive are _RefObjCommon columns 27 and 28, the
 	// reference's +0xA4 and +0xA8: a structure's full-repair price
 	// (CGObjSiegeStruct_ComputeRepairCost 4CFD50; the item repair 496E60

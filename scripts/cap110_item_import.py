@@ -89,17 +89,19 @@ def resource_dependencies(requests):
 # Parser subprocesses receive data through stdin with no shell. Unknown
 # modifier dependencies fail rather than yielding an incomplete certificate.
 # ================
-def copy_asset_closure(equipment, native, output, archives):
+def copy_asset_closure(equipment, native, output, archives, worn=True):
 	native_paths = {name: {
 		normalized_path(path.relative_to(native / folder).as_posix()): path
 		for path in (native / folder).rglob("*") if path.is_file()
 	} for name, folder in FOLDERS.items()}
 	pending, seen, records = set(items.direct_assets(equipment)), set(), []
+	# worn is false for rows that are carried, not worn (alchemy materials,
+	# tokens): they have an icon and a drop model but no worn mesh.
 	worn_models = resource_dependencies([{"weapon": {
 		"resolvedModel": "res/" + normalized_path(row[items.MODEL]),
 		"tid": list(map(int, row[items.TYPE_FIRST:items.TYPE_FOURTH + 1]))
-	}} for row in equipment if row[items.MODEL] not in ("", items.UNUSED)])
-	for row in equipment:
+	}} for row in equipment if row[items.MODEL] not in ("", items.UNUSED)]) if worn else []
+	for row in equipment if worn else ():
 		# Authored circlet rows (armor head kind 1) and jewelry have no worn
 		# mesh. Keep that absence, as the native equipment resolver does.
 		model_optional = row[items.TYPE_THIRD] in items.ACCESSORY_TYPES or (

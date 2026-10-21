@@ -36,8 +36,9 @@ type cap110Catalog struct {
 ================
 InitCap110
 
-Startup only, before action/reference admission. Compile both planes before
-publishing either, so an invalid runtime file leaves native state untouched.
+Startup only, before action/reference admission. Compile every plane (equipment,
+properties, rewards) before publishing any, so an invalid runtime file leaves
+native state untouched.
 ================
 */
 func InitCap110(textdataDir string, enabled bool) error {
@@ -52,8 +53,16 @@ func InitCap110(textdataDir string, enabled bool) error {
 	if err != nil {
 		return err
 	}
+	rewardData, err := os.ReadFile(filepath.Join(textdataDir, cap110RewardsFile))
+	if err != nil {
+		return fmt.Errorf("cap110 rewards: %w", err)
+	}
+	nextConsumables, err := compileCap110Rewards(nativeConsumables, rewardData)
+	if err != nil {
+		return err
+	}
 	markExpansionBuckets(nextEquipment, equipment)
-	equipment, properties = nextEquipment, nextProperties
+	equipment, properties, consumables = nextEquipment, nextProperties, nextConsumables
 	return nil
 }
 

@@ -101,6 +101,84 @@ class Cap110MonstersTest(unittest.TestCase):
 			monsters.merge_skills([skill(101, "SKILL_CH_OTHER")], [skill(12, "MSKILL_SD_ATTACK")], [12], {"MSKILL_SD_ATTACK": 101})
 
 	# ================
+	# test_tomb_codes_admit_elite_and_unique_while_the_field_does_not
+	# ================
+	def test_tomb_codes_admit_elite_and_unique_while_the_field_does_not(self):
+		later = {}
+		for code, grade, level in [("MOB_SD_ORDINARY", 0, 103), ("MOB_SD_ELITE", 6, 104), ("MOB_SD_BOSS", 8, 110),
+			("MOB_SD_CHAMPION", 1, 104), ("MOB_SD_LOW_ELITE", 6, 99)]:
+			row = ["0"] * 104
+			row[2], row[15], row[57] = code, str(grade), str(level)
+			later[code] = row
+		field = monsters.select_field_references(later, set(later))
+		self.assertEqual(set(field), {"MOB_SD_ORDINARY"})
+		tomb = monsters.select_field_references(later, set(later), {"MOB_SD_ELITE", "MOB_SD_BOSS", "MOB_SD_CHAMPION", "MOB_SD_LOW_ELITE"})
+		self.assertEqual(set(tomb), {"MOB_SD_ORDINARY", "MOB_SD_ELITE", "MOB_SD_BOSS"})
+
+	# ================
+	# test_tomb_population_is_its_own_world_set_and_must_be_complete
+	# ================
+	def test_tomb_population_is_its_own_world_set_and_must_be_complete(self):
+		def spawn(nest, code, world, region):
+			return {"nest_id": nest, "codename": code, "game_world_id": world, "service": 1, "region_id_unsigned": region,
+				"tactics_id": 1, "hive_id": 1, "x": 1.0, "y": 0.0, "z": 2.0, "radius": 400, "generate_radius": 300,
+				"max_total_count": 4, "delay_min": 6, "delay_max": 8, "respawn": 1, "direction_unsigned": 0,
+				"champion_percent": 0, "nest_flag": 0, "hive_flag": 0, "spawn_type": 0}
+		tactics = {1: {"dwTacticsID": 1, "dwObjID": 7, "btAIQoS": 0, "nMaxStamina": 0, "btMaxStaminaVariance": 0,
+			"nSightRange": 130, "btAggressType": 0, "AggressData": 0, "btChangeTarget": 2, "btHelpRequestTo": 0,
+			"btHelpResponseTo": 0, "btBattleStyle": 0, "BattleStyleData": 0, "btDiversionBasis": 0, "btDiversionKeepBasis": 0,
+			"btKeepDistance": 0, "KeepDistanceData": 0, "btTraceType": 0, "btTraceBoundary": 0, "TraceData": 0,
+			"btHomingType": 0, "HomingData": 0, "btAggressTypeOnHoming": 0, "btFleeType": 0, "dwChampionTacticsID": 0,
+			"AdditionOptionFlag": 0, **{f"DiversionBasisData{i}": 0 for i in range(1, 9)},
+			**{f"DiversionKeepBasisData{i}": 0 for i in range(1, 9)}}}
+		hives = {1: {"dwOverwriteMaxTotalCount": 0, "btKeepMonsterCountType": 0}}
+		spawns = [spawn(1, "MOB_SD_FIELD", 1, 100), spawn(2, "MOB_SD_TOMB", 57, 29631), spawn(3, "MOB_SD_TOMB", 58, 31423)]
+		refs = {"MOB_SD_FIELD": 1, "MOB_SD_TOMB": 2}
+		self.assertEqual([r["NestID"] for r in monsters.project_population(spawns, refs, tactics, hives)["Rows"]], [1])
+		tomb = monsters.project_population(spawns, refs, tactics, hives, monsters.TOMB_WORLDS, strict=True)
+		self.assertEqual([(r["NestID"], r["RegionID"]) for r in tomb["Rows"]], [(2, 29631), (3, 31423)])
+		with self.assertRaises(ValueError):
+			monsters.project_population(spawns, {"MOB_SD_FIELD": 1}, tactics, hives, monsters.TOMB_WORLDS, strict=True)
+		self.assertEqual(len(monsters.project_population(spawns, {"MOB_SD_FIELD": 1}, tactics, hives, monsters.TOMB_WORLDS)["Rows"]), 0)
+
+	# ================
+	# test_basic_skills_the_projection_omits_join_native_by_codename
+	# ================
+	def test_basic_skills_the_projection_omits_join_native_by_codename(self):
+		native = [skill(1, "SKILL_PUNCH_01"), skill(100, "SKILL_CH_EXISTING")]
+		source = [skill(12, "MSKILL_SD_ATTACK")]
+		client = {1: skill(1, "SKILL_PUNCH_01"), 7: skill(7, "SKILL_NOT_NATIVE")}
+		calls = []
+		def load():
+			calls.append(1)
+			return client
+		self.assertIs(monsters.add_native_client_skills(source, [12], native, load), source)
+		self.assertEqual(calls, [], "nothing missing, so the client is not read")
+		joined = monsters.add_native_client_skills(source, [12, 1], native, load)
+		self.assertEqual([int(r[1]) for r in joined], [12, 1])
+		rows, remap = monsters.merge_skills(native, joined, [12, 1], {})
+		self.assertEqual(remap[1], 1)
+		self.assertEqual([r[3] for r in rows], ["MSKILL_SD_ATTACK"])
+		still_missing = monsters.add_native_client_skills(source, [12, 7], native, load)
+		with self.assertRaises(ValueError):
+			monsters.merge_skills(native, still_missing, [12, 7], {})
+
+	# ================
+	# test_tomb_regions_seed_terrain_only_when_asked
+	# ================
+	def test_tomb_regions_seed_terrain_only_when_asked(self):
+		import json
+		import tempfile
+		from pathlib import Path
+		rows = [{"game_world_id": 1, "service": 1, "codename": "MOB_SD_FIELD", "region_id_unsigned": (74 << 8) | 57},
+			{"game_world_id": 57, "service": 1, "codename": "MOB_SD_TOMB", "region_id_unsigned": 29631},
+			{"game_world_id": 5, "service": 1, "codename": "MOB_SD_OTHER", "region_id_unsigned": 1}]
+		with tempfile.TemporaryDirectory() as root:
+			Path(root, "all-spawns.json").write_text(json.dumps(rows), encoding="utf-8")
+			self.assertEqual(monsters.outdoor_regions(root), {(57, 74)})
+			self.assertEqual(monsters.outdoor_regions(root, True), {(57, 74), (29631 & 255, 29631 >> 8)})
+
+	# ================
 	# test_equipment_classes_keep_native_lower_levels
 	# ================
 	def test_equipment_classes_keep_native_lower_levels(self):

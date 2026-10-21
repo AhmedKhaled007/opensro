@@ -220,6 +220,36 @@ class GateTests(unittest.TestCase):
 		self.assertEqual(list(stage1.table_rows(merged["teleportbuilding.txt"]))[-4:], buildings)
 		self.assertTrue(set(codes).issubset(variant.GATE_CODES))
 
+	# ================
+	# test_tomb_gates_link_the_entrance_to_three_exits_and_drop_unplaced_rows
+	# ================
+	def test_tomb_gates_link_the_entrance_to_three_exits_and_drop_unplaced_rows(self):
+		native, vsro = self.tables()
+		codes = variant.TOMB_GATE_CODES
+		self.assertEqual(codes[0], "GATE_TOMB_GATE_IN")
+		self.assertEqual(len(codes), 4)
+		self.assertFalse(set(codes) & set(variant.GATE_CODES), "tomb gates are opt-in")
+		gates = [gate(str(164 + i), code, str(27744 + i), "SN_TOMB_" + str(i)) for i, code in enumerate(codes)]
+		for at in (1, 2, 3):
+			gates[at][variant.TELEPORT_WORLD_COLUMN] = str(56 + at)  # the source's worlds 57, 58, 59
+		unplaced = gate("168", "GATE_TOMBOSIRIS_GATE_OUT_1", "27748", "SN_TOMB_OSIRIS")
+		buildings = [building(str(27744 + i), code.replace("GATE_", "STORE_", 1), "SN_TOMB_" + str(i)) for i, code in enumerate(codes)]
+		links = [link("164", "165", "0"), link("164", "166", "0"), link("164", "167", "0"),
+			link("165", "164", "0"), link("166", "164", "0"), link("167", "164", "0")]
+		vsro["teleportdata.txt"] = table(gates + [unplaced])
+		vsro["teleportbuilding.txt"] = table(buildings)
+		vsro["teleportlink.txt"] = table(links + [link("168", "164", "0")])
+		vsro["text"] = table([text(r[4], "k", "t", "s", "j", "Tomb") for r in gates])
+		merged, summary = variant.merge_gate_tables(native, vsro, codes=codes, level_cap=110)
+		self.assertEqual(summary["buildings"], 4)
+		self.assertEqual(summary["links"], 6, "the unplaced Osiris exit's link is not carried")
+		added = [r for r in stage1.table_rows(merged["teleportdata.txt"]) if r[1] in {"164", "165", "166", "167", "168"}]
+		self.assertEqual(sorted(r[1] for r in added), ["164", "165", "166", "167"])
+		# The v1.150 world table has no worlds 57-59: every tomb runs in the persistent world.
+		self.assertEqual({r[variant.TELEPORT_WORLD_COLUMN] for r in added}, {variant.PERSISTENT_WORLD})
+		self.assertEqual(summary["worldsFlattened"], {
+			"GATE_TOMB_GATE_OUT_1": "57", "GATE_TOMB_GATE_OUT_2": "58", "GATE_TOMB_GATE_OUT_3": "59"})
+
 
 def overview_row(left, bottom):
 	"""A worldmap_mapinfo overview row (id 0, kind 0) with the given region box."""
@@ -526,7 +556,7 @@ class AddGatesTests(unittest.TestCase):
 			(textdata / "textdataname.txt").write_bytes(native_tables["text"])
 			variant.read_vsro_file = lambda root, archive, name: vsro_files[name]
 			# merge_gate_tables binds GATE_CODES at definition; route the synthetic gates in.
-			variant.merge_gate_tables = lambda *a, **k: original_merge(*a, codes=SYNTHETIC_GATES, **k)
+			variant.merge_gate_tables = lambda *a, **k: original_merge(*a, **{**k, "codes": SYNTHETIC_GATES})
 			variant.os.environ[variant.LEVEL_CAP_FLAG] = cap
 			try:
 				summary, merged = variant.add_gates(Path(scratch) / "vsro", native, out)

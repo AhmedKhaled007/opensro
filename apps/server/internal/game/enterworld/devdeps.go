@@ -188,6 +188,13 @@ func NewDevDepsWithRoster(paths DevPaths, textdata *TextdataCatalogs, roster *Ro
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap: %w", err)
 		}
+		template, err = monster.AppendPharaohTomb(template, textdataDir, monster.PharaohTombEnabled())
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap: %w", err)
+		}
+		if rate, _ := monster.PharaohGearRateFromEnv(); rate > 1 && monster.PharaohTombEnabled() {
+			log.Infof("bootstrap: Pharaoh Tomb elites and uniques roll equipment x%d (%s, port-only)", rate, monster.EnvPharaohGearRate)
+		}
 		resolvedTemplate, err := appendAuthoredAreaPopulation(template, paths.AuthoredAreas)
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap: %w", err)

@@ -309,6 +309,10 @@ func run(out, release, textdata string) error {
 	if err != nil {
 		return fmt.Errorf("catalogue population: %w", err)
 	}
+	template, err = monster.AppendPharaohTomb(template, dir, monster.PharaohTombEnabled())
+	if err != nil {
+		return fmt.Errorf("catalogue tomb population: %w", err)
+	}
 	monsters, err := catalogue.BuildMonsters(catalogue.MonsterSource{Template: template, ItemID: dropItemID,
 		Skills: skillData})
 	if err != nil {

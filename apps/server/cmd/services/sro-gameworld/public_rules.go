@@ -84,6 +84,7 @@ func publicRules() publicstats.RulesResponse {
 	growth := progression.BetaGrowthFromEnv()
 	betaMastery, _ := progression.BetaMasteryFromEnv()
 	levelCap, _ := progression.LevelCapFromEnv()
+	pharaohGear, _ := monster.PharaohGearRateFromEnv()
 	alexandriaOn, _ := alexandria.EnabledFromEnv()
 	shopGoods, _ := commerce.ExtraGoodsFromEnv()
 	mallGoods, _ := commerce.MallExtraGoodsFromEnv()
@@ -100,6 +101,14 @@ func publicRules() publicstats.RulesResponse {
 				Native: "The v1.150 monster population and equipment drop catalog.",
 				Now:    "Alexandria field monsters at levels 100-110 and database equipment drops through level 110.",
 				Why:    "An outdoor leveling route for the optional cap-110 expansion."},
+			{Flag: monster.EnvPharaohTomb, On: monster.PharaohTombEnabled(),
+				Native: "There is no Pharaoh Tomb.",
+				Now:    "The Pharaoh Tombs open from Kings Valley, each a shared area of level 100-110 monsters and bosses.",
+				Why:    "Endgame hunting for the optional cap-110 expansion."},
+			{Flag: monster.EnvPharaohGearRate, On: pharaohGear > 1,
+				Native: "A Pharaoh Tomb elite or unique rolls its equipment at the original rate.",
+				Now:    fmt.Sprintf("A Pharaoh Tomb elite or unique rolls its equipment %d times as often.", pharaohGear),
+				Why:    "The tomb's gear is rare by design; testers need to see it."},
 			{Flag: alexandria.EnvAlexandria, On: alexandriaOn,
 				Native: "The world is the v1.150 map; Alexandria is not part of it.",
 				Now:    "The Alexandria city is open, with its gates, ferry and townspeople.",
