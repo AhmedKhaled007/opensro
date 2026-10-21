@@ -22,8 +22,10 @@ import (
 	"opensro.online/server/internal/game/action"
 	"opensro.online/server/internal/game/companion"
 	"opensro.online/server/internal/game/enterworld"
+	"opensro.online/server/internal/game/item/loot"
 	"opensro.online/server/internal/game/progression"
 	"opensro.online/server/internal/game/quest"
+	"opensro.online/server/internal/game/world/monster"
 	"opensro.online/server/internal/game/world/simulation"
 	"opensro.online/server/internal/platform/readiness"
 	"opensro.online/server/internal/security/auth"
@@ -127,6 +129,9 @@ func openAuthorityPlane(
 	textdataDir := devPaths.TextdataDir
 	textdata, err := enterworld.LoadTextdataCatalogs(textdataDir)
 	if err != nil {
+		return authorityPlane{}, err
+	}
+	if err := loot.InitCap110(textdataDir, monster.Cap110Enabled()); err != nil {
 		return authorityPlane{}, err
 	}
 	if companion.AttackPetExpansionEnabled() {

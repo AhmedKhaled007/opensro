@@ -329,7 +329,14 @@ def import_alexandria(vsro_root, extracted):
 		city = city_regions(table_text(media_data, media_index, "regioncode.txt"))
 		if not city:
 			raise SystemExit(f"regioncode.txt has no {CITY_REGION_CODE} region; is this a VSRO client with Alexandria?")
-		regions = connected_regions(city, vsro_only_regions(data_data, data_index, extracted))
+		# Port-only, not native: field regions are seeds for complete source
+		# terrain components, not an exhaustive list of regions worth importing.
+		# Empty connecting terrain and mountain sectors have no monster nests.
+		fields = set()
+		if os.environ.get("SRO_CAP110_MONSTERS", "").lower() in FLAG_ON:
+			from cap110_monsters import outdoor_regions, SOURCE_ENV
+			fields = outdoor_regions(os.environ[SOURCE_ENV])
+		regions = connected_regions(city, vsro_only_regions(data_data, data_index, extracted), fields)
 		log(f"{len(city)} city regions, {len(regions)} regions with the fields around it")
 
 		tile_ids, copied, missing = set(), [], []

@@ -156,6 +156,12 @@ variable "level_cap" {
   default = "off"
 }
 
+# Port-only, not native: optional database-authored Alexandria field content.
+variable "cap110_monsters" {
+  type    = string
+  default = "off"
+}
+
 # beta_silk is the silk one in-world hour earns into the account's real Item
 # Mall wallet (BUG-062, port-only): earning pauses at 1500, and a new account
 # starts with 300. Earned silk is REAL and survives "off", which only stops
@@ -900,6 +906,7 @@ job "sro-gameworld-__SHARD_ID__" {
         SRO_BETA_PLAYER_MAP                     = var.beta_player_map
         SRO_BETA_MASTERY                        = var.beta_mastery
         SRO_LEVEL_CAP                      = var.level_cap
+        SRO_CAP110_MONSTERS                = var.cap110_monsters
         SRO_BETA_SILK                           = var.beta_silk
         SRO_MAINTENANCE_GATE_PATH               = var.maintenance_gate_path
         SRO_PET_PACING                          = var.pet_pacing

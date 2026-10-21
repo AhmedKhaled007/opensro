@@ -28,6 +28,7 @@ import (
 	"opensro.online/server/internal/game/enterworld"
 	"opensro.online/server/internal/game/item/alchemy"
 	"opensro.online/server/internal/game/item/commerce"
+	"opensro.online/server/internal/game/item/loot"
 	"opensro.online/server/internal/game/progression"
 	"opensro.online/server/internal/game/quest"
 	"opensro.online/server/internal/game/world/monster"
@@ -257,6 +258,10 @@ func run(out, release, textdata string) error {
 	}
 	header := catalogue.Header{SchemaVersion: catalogue.SchemaVersion, Release: release,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339)}
+	cap110 := monster.Cap110Enabled()
+	if err := loot.InitCap110(dir, cap110); err != nil {
+		return fmt.Errorf("catalogue loot: %w", err)
+	}
 	refItems, err := shardItems(dir)
 	if err != nil {
 		return err
@@ -300,7 +305,11 @@ func run(out, release, textdata string) error {
 	quests := catalogue.BuildQuests(catalogue.QuestSource{Catalog: questCatalog, Definitions: definitions,
 		Text: englishText(dir), Listed: listedQuests(dir), ItemID: itemID})
 	skillData := enterworld.NewTextdataSkills(dir)
-	monsters, err := catalogue.BuildMonsters(catalogue.MonsterSource{Template: monster.LoadTemplate(dir), ItemID: dropItemID,
+	template, err := monster.AppendCap110(monster.LoadTemplate(dir), dir, cap110)
+	if err != nil {
+		return fmt.Errorf("catalogue population: %w", err)
+	}
+	monsters, err := catalogue.BuildMonsters(catalogue.MonsterSource{Template: template, ItemID: dropItemID,
 		Skills: skillData})
 	if err != nil {
 		return fmt.Errorf("monsters: %w", err)

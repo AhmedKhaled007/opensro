@@ -61,6 +61,8 @@ var Settings = []Setting{
 	{Env: "SRO_BETA_MASTERY", NomadVar: "beta_mastery", Default: "on", Catalogue: true, Source: Built},
 	// Port-only, not native: optional expansion; deployments stay at 90.
 	{Env: "SRO_LEVEL_CAP", NomadVar: "level_cap", Default: "off", Catalogue: true},
+	// Port-only, not native: database-authored Alexandria field population.
+	{Env: "SRO_CAP110_MONSTERS", NomadVar: "cap110_monsters", Default: "off", Catalogue: true},
 	{Env: "SRO_BETA_SILK", NomadVar: "beta_silk", Default: "50"},
 	// Grab and growth pets at four fifths of their run speed (#320): never
 	// deployed, so the deployment default stays native.

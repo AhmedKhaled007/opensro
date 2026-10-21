@@ -501,9 +501,9 @@ def lower_paths(root):
 # ================
 # build_variant
 # ================
-def build_variant(vsro_root, native, variant):
+def build_variant(vsro_root, native, variant, imported_root=None):
 	"""Make the variant's extracted/ tree; returns its manifest."""
-	imported = native / stage1.OUTPUT_FOLDER
+	imported = Path(imported_root) if imported_root else native / stage1.OUTPUT_FOLDER
 	stage_manifest = json.loads((imported / stage1.MANIFEST_NAME).read_text(encoding="utf-8"))
 	regions = [(r["sectorX"], r["sectorY"]) for r in stage_manifest["regions"]]
 	out = variant / "extracted"
@@ -573,6 +573,8 @@ def build_variant(vsro_root, native, variant):
 	skill_tier = add_skills(vsro_root, native, out)
 	from cap110_skill_import import add_skill_effects
 	skill_animation = add_skill_effects(vsro_root, native, out)
+	from cap110_monsters import add_monsters
+	field_monsters = add_monsters(vsro_root, native, out)
 	from alexandria_npc_services import add_services
 	city_services = add_services(vsro_root, native, out)
 
@@ -580,6 +582,7 @@ def build_variant(vsro_root, native, variant):
 	replace_file(out / "Map_extracted" / "environment.ifo", environment)
 
 	manifest = {
+		"fieldMonsters": field_monsters,
 		"format": "opensro-alexandria-variant-v1",
 		"portOnly": True,
 		"regions": stage_manifest["regions"],
@@ -816,6 +819,7 @@ def main():
 	parser = argparse.ArgumentParser(description="Build the v1.150 + Alexandria game root (port-only, not native).")
 	parser.add_argument("--vsro-root", default=os.environ.get(stage1.ROOT_ENV), help="VSRO client folder")
 	parser.add_argument("--variant-root", required=True, help="the new game root to create")
+	parser.add_argument("--imported-root", type=Path, help="isolated stage-1 import instead of the native extraction's import folder")
 	args = parser.parse_args()
 	if not stage1.flag_enabled():
 		raise SystemExit(f"{stage1.FLAG_ENV} is not on. Alexandria is port-only, not native.")
@@ -824,7 +828,7 @@ def main():
 	variant = Path(args.variant_root).resolve()
 	if variant == EXTRACTED_ROOT.parent.resolve() or EXTRACTED_ROOT.resolve() in variant.parents:
 		raise SystemExit("The variant root must be a different folder from the native game root.")
-	manifest = build_variant(Path(args.vsro_root), EXTRACTED_ROOT, variant)
+	manifest = build_variant(Path(args.vsro_root), EXTRACTED_ROOT, variant, args.imported_root)
 	log(f"tile remap {manifest['tileRemap']}, {manifest['mapFilesAdded']} map files, {manifest['dataFilesAdded']} data files")
 	log(f"Next: SRO_GAME_ROOT={variant} SRO_GENERATED_ROOT={variant / '.generated'} pnpm assets build full")
 
