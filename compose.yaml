@@ -1,0 +1,91 @@
+# ===========================================================================
+# compose.yaml - the OpenSRO development stack in one container
+#
+#   docker/configure.sh                   # once per checkout: writes .env
+#   docker compose build
+#   docker compose run --rm sro assets    # once: game data from your client
+#   docker compose up                     # Nomad, Agent, GameWorld, client
+#
+# Host networking is required: every listener (Nomad, Agent, GameWorld,
+# Vite) binds 127.0.0.1, and the deployer refuses a non-loopback network in
+# the development namespace. The stack owns the same host ports a native
+# run does. See docker/README.md.
+# ===========================================================================
+
+name: opensro
+
+services:
+  sro:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      # assets where Google Chrome exists (amd64), stack elsewhere
+      # (docker/Dockerfile); configure.sh writes it.
+      target: ${SRO_DOCKER_TARGET:-assets}
+      args:
+        UID: ${SRO_DOCKER_UID:?run docker/configure.sh first}
+        GID: ${SRO_DOCKER_GID:?run docker/configure.sh first}
+    image: opensro-dev
+    init: true
+    network_mode: host
+    # Host PIDs, as a native run sees them. A store's authority.lock keeps
+    # its last writer's pid after the OS lock is released, and off Windows a
+    # live process with that pid counts as the owner
+    # (apps/server/internal/data/store/lockfile.go). A private namespace
+    # restarts pids at 1 on every start, so an old pid would soon name a new
+    # process and lock the world out.
+    pid: host
+    # On SELinux hosts (Fedora, RHEL) the bind mounts below would need
+    # relabelling before the container could read them; this container
+    # already shares the host's network and pids, so it skips the SELinux
+    # separation instead. Hosts without SELinux ignore it.
+    security_opt:
+      - label=disable
+    # sro-nomad stop waits out each task's kill timeout (90s) before Nomad
+    # itself shuts down.
+    stop_grace_period: 3m
+    # Chrome renders the asset build's portraits; Docker's 64 MB /dev/shm
+    # is too small for it.
+    shm_size: 2gb
+    working_dir: ${SRO_DOCKER_CHECKOUT:?run docker/configure.sh first}
+    environment:
+      # With host pids the init is not pid 1; this keeps it reaping orphans.
+      TINI_SUBREAPER: "1"
+      SRO_GAME_ROOT: ${SRO_DOCKER_GAME_ROOT:?run docker/configure.sh first}
+      # Without a host GPU headless Chrome offers WebGPU only on its
+      # SwiftShader software adapter, and only with this switch
+      # (scripts/lib/probeBrowser.mjs). docker/compose.gpu.yaml replaces it
+      # when configure.sh finds an Intel or AMD GPU; the asset build's
+      # portraits need one.
+      SRO_PROBE_EXTRA_CHROME_ARGS: --enable-unsafe-webgpu
+      # Passed through only when set on the host.
+      SRO_BUILD_JOBS:
+    # Every path is mounted where it is on the host. A worktree's .git file
+    # names the main checkout by absolute path and the resolvers follow it
+    # to the shared .generated trees; the Nomad dev agent records its config
+    # and data paths. Compose merges mounts that name the same path, as the
+    # checkout and main checkout do outside a worktree.
+    volumes:
+      - type: bind
+        source: ${SRO_DOCKER_CHECKOUT}
+        target: ${SRO_DOCKER_CHECKOUT}
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SRO_DOCKER_MAIN_CHECKOUT:?run docker/configure.sh first}
+        target: ${SRO_DOCKER_MAIN_CHECKOUT}
+        bind:
+          create_host_path: false
+      # The licensed v1.150 client folder (SRO_Client.exe, *.pk2);
+      # `assets prepare` writes its extracted/ folder here.
+      - type: bind
+        source: ${SRO_DOCKER_GAME_ROOT}
+        target: ${SRO_DOCKER_GAME_ROOT}
+        bind:
+          create_host_path: false
+      # docker/compose.casefold.yaml mounts a case-insensitive extracted/
+      # over this folder when the kernel supports it.
+      - cache:/cache
+
+volumes:
+  cache:

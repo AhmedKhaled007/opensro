@@ -1,0 +1,26 @@
+# ===========================================================================
+# compose.gpu.yaml - the host's GPU for the container's Chrome
+#
+# The asset build renders monster portraits through the client's WebGPU
+# viewer in headless Chrome. Without a GPU Chrome offers only its
+# SwiftShader software adapter, on which the viewer never fills its
+# portrait target ("No portrait target __doll"), and the build fails.
+#
+# docker/configure.sh adds this file through COMPOSE_FILE when the host has
+# a GPU on a driver the image's Mesa Vulkan drivers cover (i915 or xe for
+# Intel, amdgpu for AMD), with the group ids that own its device nodes. All
+# of /dev/dri is passed in; Mesa ignores nodes it has no driver for, such as
+# an NVIDIA GPU beside the Intel one.
+# ===========================================================================
+
+services:
+  sro:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${SRO_DOCKER_RENDER_GID:?run docker/configure.sh first}"
+      - "${SRO_DOCKER_VIDEO_GID:?run docker/configure.sh first}"
+    environment:
+      # Chrome on Linux reaches WebGPU through Vulkan; the probe launcher's
+      # own --use-angle=default comes first, so this one wins.
+      SRO_PROBE_EXTRA_CHROME_ARGS: --enable-unsafe-webgpu --enable-features=Vulkan --use-angle=vulkan --ignore-gpu-blocklist
