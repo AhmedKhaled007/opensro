@@ -187,6 +187,7 @@
     "src/engine/runtime/ui/hud/hunting-guide.ts": "src/engine/runtime/ui/hud/world-map.ts"
   },
   "internals": {
+    "src/engine/runtime/characters/resources/procedural-effects.ts": "src/engine/runtime/characters/resources/resources.ts",
     "src/engine/runtime/platform/telemetry.ts": "src/engine/runtime/platform/platform.ts",
     "src/engine/runtime/platform/ui/drag-shield.ts": "src/engine/runtime/platform/ui/ui.ts",
     "src/engine/runtime/runtime-errors.ts": "src/engine/runtime/runtime.ts",

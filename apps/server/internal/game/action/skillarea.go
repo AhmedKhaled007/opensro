@@ -163,6 +163,13 @@ func (rt *Runtime) planAreaVictims(in areaPlanInput) (areaStrikePlan, bool) {
 			plan.formulas = append(plan.formulas, formula)
 		}
 		percent = percent * uint64(100-in.reduction) / fullAreaPercent
+		rt.penguinOwnerShatter(in.division, in.snapshot, target, plan.formulas, in.now)
+		total = 0
+		for _, f := range plan.formulas {
+			if !f.Blocked {
+				total += uint64(f.Damage)
+			}
+		}
 		if in.poseAll || total >= uint64(target.CurrentHP) || index == 0 && in.posePrimary {
 			mover, found := rt.Monsters.Mover(in.division, target.Gid)
 			if !found {
@@ -705,6 +712,15 @@ func (rt *Runtime) acceptSkillAreaAt(division string, character, snapshot *enter
 				}
 			}
 		}
+		var penguinVictims []monster.Instance
+		var penguinHits []combat.Result
+		for _, victim := range plan.victims {
+			if victim.sequence >= 0 {
+				penguinVictims = append(penguinVictims, *victim.target.monster)
+				penguinHits = append(penguinHits, victim.formulas...)
+			}
+		}
+		rt.penguinOwnerHit(division, character, skill, penguinVictims, penguinHits, nowMs)
 		rt.wolfExecuteAttack(division, character, 0, 1, targets, nowMs)
 	}
 	return mergeOpResults(out, published.returned), skillCastAccepted

@@ -27,6 +27,7 @@ companion. Monster pursuit already resolves both kinds of opponent.
 package action
 
 import (
+	"opensro.online/server/internal/game/companion"
 	"strings"
 	"sync/atomic"
 
@@ -243,6 +244,11 @@ func (rt *Runtime) advancePetCombat(step petCombatStep) (frames []simulation.Fra
 		rt.cancelPetCombat(step.key, step.state, step.nowMs)
 		return nil, false
 	}
+	if rt.petExpansionAllowed(step.snapshot, step.pet) && companion.PetKind(step.pet.Codename) == "Penguin" && target.monster != nil {
+		skill.ActionRange = 150
+		skill.ActionCastingTimeMs = 600
+		skill.ProjectileSpeed = 500
+	}
 	block := rt.cosAbnormal(step.key.division, step.snapshot.Name, step.pet.GID)
 	spacing := simulation.CombatSpacing{
 		ActorBodyRadius:  simulation.BodyRadius(step.ref.Parameters.BodyRadius),
@@ -429,6 +435,15 @@ func (rt *Runtime) petStrike(step petCombatStep, target monster.Instance, skill 
 		actor: actor, credit: ownerGID, level: level, from: step.state.follower.Position(step.nowMs)}, skill, target, formulas, step.nowMs)
 	if !planned {
 		return petStrikeResult{}, false
+	}
+	if step.trained != nil && step.trained.coldExtension {
+		for i := range plans {
+			for j := range plans[i].Abnormal {
+				if plans[i].Abnormal[j].Status == abnormal.Frostbite {
+					plans[i].Abnormal[j].DurationMs += 2000
+				}
+			}
+		}
 	}
 	monsterPose := monster.Pose{RegionID: targetAt.RegionID, X: targetAt.X, Y: targetAt.Y, Z: targetAt.Z}
 	roster := rt.monsterRewardRoster(division, owner, step.nowMs)

@@ -16,6 +16,11 @@ lifecycles that belong in separate owners (see the size ledger).
 ===========================================================================
 */
 import {
+	createPenguinBolts,
+	penguinEffectActors,
+	PENGUIN_EFFECT_SOUND
+} from "@/engine/foundation/animation/penguin-effects";
+import {
 	PET_BOND_TRANSFER_SOUND,
 	PET_BOND_REVIVE_SOUND,
 	PET_ROAR_SOUND,
@@ -483,6 +488,7 @@ export function createCharacterEffects(
 			shockCoreGid: number;
 		}
 	>();
+	const penguinBolts = createPenguinBolts( allocate );
 	// Wolf Hunting Howl (actions 1..3) and Savage Rend (4..6) on the wolf's GID.
 	const wolfSkills = new Map<
 		number,
@@ -2050,6 +2056,21 @@ export function createCharacterEffects(
 					}
 				}
 				const result: CharacterActor[] = [];
+				const penguin = gameplay?.petTraining?.skills.some( skill => skill.id >= 31 && skill.id <= 45 ) ?
+					gameplay.petTraining.gid :
+					0;
+				for (
+					const actor of penguinBolts.step(
+						gameplay?.casts ?? [],
+						penguin,
+						byGid,
+						presentation,
+						now,
+						gameplay?.petTraining?.skills.find( skill => skill.queued )?.id ?? 0
+					)
+				) {
+					if ( ready( actor.model ) ) result.push( actor );
+				}
 				// Port-only: quiet Resolve ring follows the bear; never changes its action.
 				for ( const entity of byGid.values() ) {
 					const resolve = entity.petResolve;
@@ -3606,7 +3627,8 @@ export function createCharacterEffects(
 				for ( const entity of entities ) {
 					const action = entity.emote?.action ?? 0;
 					if (
-						!(entity.kind === "cos" && action >= 1 && action <= 6) && !(action >= 0xf0 && action <= 0xf4)
+						!(entity.kind === "cos" && action >= 1 && action <= 6) && !(action >= 0xf0 && action <= 0xf4) &&
+						!(action >= 0xd0 && action <= 0xd6)
 					) {
 						continue;
 					}
@@ -3630,20 +3652,29 @@ export function createCharacterEffects(
 				}
 				for ( const [gid, skill] of [ ...wolfSkills ] ) {
 					const entity = byGid.get( gid );
-					if ( !entity || entity.emote?.revision !== skill.revision ) {
+					const elapsed = Math.max( 0, now - skill.startedAt );
+					const frost = skill.action >= 0xd0 && skill.action <= 0xd6;
+					// Ground frost outlives its victim; retain the latched pose for its bounded lifetime.
+					if (
+						!frost && (!entity || entity.emote?.revision !== skill.revision) ||
+						!entity && elapsed >= WOLF_EFFECT_SECONDS
+					) {
 						wolfSkills.delete( gid );
 						continue;
 					}
-					const elapsed = Math.max( 0, now - skill.startedAt );
-					const parts = wolfEffectParts( skill.action );
-					const kind = wolfEffectKind( skill.action );
+					const parts = frost ? [] : wolfEffectParts( skill.action );
+					const kind = skill.action >= 0xd0 && skill.action <= 0xd6 ?
+						"victim" :
+						wolfEffectKind( skill.action );
 					// Keep the consumed revision until the entity leaves or a new emote arrives.
 					if ( elapsed >= WOLF_EFFECT_SECONDS ) continue;
 					const live = presentation.get( gid )?.pose ?? skill.pose;
 					// Victims keep where they were struck; a dead monster may already be gone.
 					const pose = kind === "victim" ? skill.pose : live;
-					const owner = entity.ownerGid !== undefined ? presentation.get( entity.ownerGid )?.pose : undefined;
-					const cue = wolfEffectSound( skill.action );
+					const owner = entity?.ownerGid !== undefined ?
+						presentation.get( entity.ownerGid )?.pose :
+						undefined;
+					const cue = PENGUIN_EFFECT_SOUND[skill.action] ?? wolfEffectSound( skill.action );
 					if ( !skill.sounded && cue && elapsed >= cue.at ) {
 						skill.sounded = true;
 						if ( elapsed - cue.at < .25 ) {
@@ -3663,6 +3694,12 @@ export function createCharacterEffects(
 								periodMs: 20
 							} );
 						}
+					}
+					if ( frost ) {
+						for ( const actor of penguinEffectActors( skill.action, elapsed, pose, skill.gids ) ) {
+							if ( ready( actor.model ) ) result.push( actor );
+						}
+						continue;
 					}
 					// A short blood-red flare at the strike, a slower one for the howl.
 					const glow = kind === "howl" ?
@@ -4009,6 +4046,7 @@ export function createCharacterEffects(
 			hwan.clear();
 			roars.clear();
 			wolfSkills.clear();
+			penguinBolts.reset();
 			roarAppearances.clear();
 			shields.clear();
 			spiritRings.clear();
@@ -4055,6 +4093,7 @@ export function createCharacterEffects(
 			roars.clear();
 			wolfSkills.clear();
 			roarAppearances.clear();
+			penguinBolts.reset();
 			shields.clear();
 			statuses.clear();
 			cameraEvents.length = 0;

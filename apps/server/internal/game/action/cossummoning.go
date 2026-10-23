@@ -168,6 +168,7 @@ func (rt *Runtime) usePersistentSummoner(use persistentSummonUse, result *OpResu
 	}
 	pet.SummonGeneration++
 	pet.ResolveStacks = 0
+	pet.ArcaneMagicPercent = 0
 	if rt.AttackPetExpansion && ref.TidWord>>11 == attackPetBand {
 		pet.CurrentHP = min(pet.CurrentHP, ref.MaxHP)
 	}

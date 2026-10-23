@@ -275,6 +275,9 @@ func ModifiersFor(p *domain.CharacterCOS) Modifiers {
 			m.FindPct += v
 		}
 	}
+	if PetKind(p.Codename) == "Penguin" {
+		m.MagicPct += p.ArcaneMagicPercent
+	}
 	m.CooldownPct = min(m.CooldownPct, 80)
 	return m
 }

@@ -87,9 +87,10 @@ One strike's trained plan, shared by every target of the strike.
 ================
 */
 type petTrainedStrike struct {
-	codename string
-	mods     companion.Modifiers
-	uses     []petRowUse
+	hourglass, coldExtension, echo, penguinRepeat, lanceShatter bool
+	codename                                                    string
+	mods                                                        companion.Modifiers
+	uses                                                        []petRowUse
 	// ownerState is the owner's 0x3FB1 push after a row was spent.
 	ownerState  []wire.Frame
 	reserved    bool
@@ -192,6 +193,12 @@ func (rt *Runtime) petTrainedDecide(step petCombatStep, skill enterworld.SkillRo
 	if target.monster == nil || !rt.petExpansionAllowed(step.snapshot, pet) {
 		return skill, nil
 	}
+	// The legacy queue must obey the same eligibility as the explicit cast command.
+	if companion.PetKind(pet.Codename) == "Penguin" {
+		if _, ok := rt.penguinCompanion(step.key.division, step.state.character, step.nowMs); !ok {
+			return skill, nil
+		}
+	}
 	ts := &petTrainedStrike{mods: companion.ModifiersFor(pet), passive: -1, codename: pet.Codename}
 	if companion.Profile(pet.Codename).MagicPrimary {
 		skill.Attack.Flags = skill.Attack.Flags&^4 | 8
@@ -215,6 +222,7 @@ func (rt *Runtime) petTrainedDecide(step petCombatStep, skill enterworld.SkillRo
 		}
 	}
 	rt.petApplyPassives(step, &skill, ts, level, hpPercent)
+	penguinPlan(step, &skill, ts)
 	if companion.PetKind(pet.Codename) == "Wolf" {
 		damage, crit := wolfDamageBonus(step, 0)
 		ts.damageBonus += damage
@@ -346,6 +354,23 @@ func (rt *Runtime) petApplyAction(step petCombatStep, skill *enterworld.SkillRow
 		run.retribution, run.retribStored, run.retribPercent, run.retribStun = step.nowMs+10000, 0, v, rank3
 	case "Iron Hide":
 		return false // Port-only shields are explicitly cast, not an attack proc.
+	case "Ice Lance":
+		skill.Attack.Percent = skill.Attack.Percent * int64(v) / 100
+		setPetStatus(skill, tagFrostbite, [6]uint32{level + 20, 40})
+		if s.Option >= 2 {
+			setPetArea(skill, 3, 2, 3, 0)
+		}
+		if s.Option == 3 {
+			ts.lanceShatter = true
+		}
+	case "Blizzard":
+		skill.Attack.Percent = skill.Attack.Percent * int64(v) / 100
+		radius := 5.0
+		if s.Option >= 2 {
+			radius = 7
+			setPetStatus(skill, tagFrostbite, [6]uint32{level + 20, 100})
+		}
+		setPetArea(skill, petAreaAroundTarget, radius, 8, 0)
 	case "Frost Nova":
 		radius := 5.0
 		if rank2 {
@@ -540,6 +565,9 @@ func (rt *Runtime) petTrainedDamage(ts *petTrainedStrike, target monster.Instanc
 		}
 		lastHit = i
 		bonus := ts.damageBonus
+		if ts.lanceShatter && target.Abnormal != nil && target.Abnormal.Has(abnormal.Frostbite) {
+			bonus += 50
+		}
 		if ts.rendBleed && petTargetBleeds(target) {
 			bonus += 25
 		}
@@ -619,6 +647,7 @@ func (rt *Runtime) petTrainedCommit(step petCombatStep, owner *enterworld.Charac
 		companion.StartRow(&live.Training, u.row, u.skill, u.level, step.nowMs, ts.mods)
 		live.Training.Queued = 0
 	}
+	penguinReserve(step, live, ts)
 	if len(ts.uses) > 0 || live.Training.Rows != previousRows {
 		// The owner's window shows the spent row and the cleared queue.
 		ts.ownerState = rt.petTrainingStateFrames(live, step.nowMs)

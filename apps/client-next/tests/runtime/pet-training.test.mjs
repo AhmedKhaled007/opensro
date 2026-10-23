@@ -386,7 +386,7 @@ test("advanced tooltips include inherited proficiency in the current effect", ()
 		),
 		/Proficiency/
 	);
-	assert.match( petEffect( feathers, 10, 1 ), /up to 5 targets/ );
+	assert.match( petEffect( feathers, 10, 1 ), /Maximum stacks 5/ );
 	assert.match( petEffect( murder, 200, 1 ), /Every 8th damaging attack/ );
 	assert.match( petEffect( murder, 200, 1 ), /2 s Myopia/ );
 });
@@ -885,4 +885,30 @@ test("the quickslot bar asks again for a pet state lost to an early ask or a wor
 		ask: false,
 		next: { ref: 0, asks: 0, atMs: 0 }
 	} );
+});
+
+test("penguin counters reject overflow atomically and expose ready Hourglass", () => {
+	const t = createPetTraining( () => null );
+	t.receive( { opcode: OP_PET_TRAINING_STATE, payload: statePayload( [], [] ) }, 100 );
+	const packet = new Uint8Array( 20 );
+	new DataView( packet.buffer ).setUint32( 0, 0x2000001, true );
+	packet.set( [ 4, 3, 5 ], 17 );
+	t.receive( { opcode: OP_PET_SKILL_COUNTERS, payload: packet }, 200 );
+	assert.equal( t.state()?.counters?.penguinResonance, 4 );
+	assert.equal( t.state()?.counters?.hourglass, 5 );
+	for ( const offset of [ 17, 18, 19 ] ) {
+		const bad = packet.slice();
+		bad[offset] = 6;
+		assert.throws( () => t.receive( { opcode: OP_PET_SKILL_COUNTERS, payload: bad }, 300 ) );
+		assert.equal( t.state()?.counters?.hourglass, 5 );
+	}
+});
+
+test("penguin books explain the complete frost caster kit", () => {
+	for ( const d of PET_DESIGN.treeSkills.filter( s => s.pet === "Penguin" ) ) {
+		const effect = petEffect( d, d.value, 1 );
+		assert.ok( effect.length > 10 );
+		assert.doesNotMatch( effect, /Planned|Static Feathers|Mana Tide/ );
+	}
+	assert.match( petEffect( defined( PET_DESIGN.treeSkills.find( s => s.id === 45 ) ), 2, 1 ), /2 s longer/ );
 });

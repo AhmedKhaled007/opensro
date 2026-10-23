@@ -210,7 +210,8 @@ effects, then the streak's (port-only).
 func (rt *Runtime) statModifierWrites(division string, c *enterworld.Character) []paramkeeper.Write {
 	writes := append(rt.effects.ModifierWrites(division, c.Name), rt.mostWantedWrites(c)...)
 	writes = append(writes, rt.wolfHowlWrites(division, c)...)
-	return append(writes, rt.wolfBloodWrites(division, c)...)
+	writes = append(writes, rt.wolfBloodWrites(division, c)...)
+	return append(writes, rt.penguinMagicWrites(division, c)...)
 }
 
 /*

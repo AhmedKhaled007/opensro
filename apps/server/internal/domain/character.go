@@ -642,6 +642,8 @@ type CharacterCOS struct {
 	Training PetTraining `json:"training,omitzero"`
 	// Port-only combat stacks; never restored from a summoner item.
 	ResolveStacks uint8 `json:"-"`
+	// Port-only Arcane Resonance projection; cleared on re-entry.
+	ArcaneMagicPercent float64 `json:"-"`
 	// Runtime source-zero movement multiplier installed by 548A30.
 	FollowRunFactor float32 `json:"-"`
 	FollowRunSet    bool    `json:"-"`

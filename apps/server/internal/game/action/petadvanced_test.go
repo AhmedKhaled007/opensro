@@ -62,7 +62,6 @@ func TestAdvancedPetPassivesCommitTheirStatuses(t *testing.T) {
 		id         uint8
 		status     abnormal.Status
 	}{
-		{"static-feathers-III", "COS_P_PENGUIN_040", 42, abnormal.ElectricShock},
 		{"murder-of-crows-III", "COS_P_RAVEN_040", 60, abnormal.Myopia},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,8 +189,6 @@ func TestAdvancedPetStatPassivesReachCombat(t *testing.T) {
 		code, kind string
 		id         uint8
 	}{
-		{"COS_P_PENGUIN_040", "defense", 45},
-		{"COS_P_PENGUIN_040", "magic", 39},
 		{"COS_P_RAVEN_040", "speed", 57},
 	} {
 		t.Run(tc.code+tc.kind, func(t *testing.T) {
