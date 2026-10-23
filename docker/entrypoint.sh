@@ -5,7 +5,8 @@
 #   stack   the docs/GETTING_STARTED.md server cluster and browser client in
 #           one container: the pinned Nomad dev agent, provisioning,
 #           deploy -build, then the client dev server on 127.0.0.1:5180.
-#   assets  the game-data build from the licensed client mounted at /game.
+#   assets  the game-data build from the licensed client at SRO_GAME_ROOT,
+#           in the assets image target only.
 #   setup   pnpm install only.
 #
 # Anything else runs as a command: a shell, pnpm check source, go test.
@@ -135,20 +136,39 @@ run_stack() {
 }
 
 #
+# require_asset_tools
+#
+# The stack image target leaves out Chrome and the other asset-build tools
+# (docker/Dockerfile).
+#
+require_asset_tools() {
+	if ! command -v google-chrome >/dev/null; then
+		echo "sro-docker: this image is the stack target, without the asset-build tools." >&2
+		echo "sro-docker: build game data on an amd64 Linux machine (docker/README.md)" >&2
+		return 1
+	fi
+}
+
+#
 # casefold_extracted
 #
-# compose.yaml mounts extracted/ on a casefold tmpfs. Lookups ignore case
-# only in folders flagged +F, which must be set while the folder is empty;
-# every folder prepare then creates inherits it.
+# docker/compose.casefold.yaml mounts extracted/ on a casefold tmpfs; without
+# it extracted/ is the host folder, which works when its filesystem has
+# casefold enabled. Lookups ignore case only in folders flagged +F, which
+# must be set while the folder is empty; every folder prepare then creates
+# inherits it.
 #
 casefold_extracted() {
 	local extracted="$SRO_GAME_ROOT/extracted"
-	if [[ "$(lsattr -d "$extracted" | cut -d' ' -f1)" == *F* ]]; then
+	if [[ "$(lsattr -d "$extracted" 2>/dev/null | cut -d' ' -f1)" == *F* ]]; then
 		return
 	fi
-	if ! chattr +F "$extracted"; then
-		echo "sro-docker: cannot make $extracted case-insensitive." >&2
-		echo "sro-docker: it needs Linux 6.13+ and the empty compose volume (docker volume rm opensro_extracted)" >&2
+	if ! chattr +F "$extracted" 2>/dev/null; then
+		echo "sro-docker: cannot make $extracted case-insensitive, which the asset build needs." >&2
+		echo "sro-docker: on Linux 6.13+ rerun docker/configure.sh, which adds a casefold tmpfs for it;" >&2
+		echo "sro-docker: if it already did, remove the old volume (docker volume rm <project>_extracted)." >&2
+		echo "sro-docker: on an older kernel, give an empty extracted/ a casefold ext4 or f2fs filesystem." >&2
+		echo "sro-docker: see docker/README.md" >&2
 		return 1
 	fi
 }
@@ -156,12 +176,14 @@ casefold_extracted() {
 #
 # run_assets
 #
-# Section 2 of GETTING_STARTED.md, in its order. extracted/ is empty at the
-# start of each run (compose.yaml), so prepare extracts the client again.
+# Section 2 of GETTING_STARTED.md, in its order. On the casefold tmpfs
+# extracted/ is empty at the start of each run, so prepare extracts the
+# client again. The checks come first, before anything slow.
 #
 run_assets() {
-	install_packages
+	require_asset_tools
 	casefold_extracted
+	install_packages
 	cd "$CHECKOUT"
 	pnpm assets prepare
 	pnpm assets doctor

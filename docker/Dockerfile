@@ -1,11 +1,18 @@
 # ===========================================================================
-# Dockerfile - the OpenSRO development toolchain and local stack in one image
+# Dockerfile - the OpenSRO development toolchain and local stack
 #
-# One Linux image with the tools docs/GETTING_STARTED.md lists: Go, Node.js
-# with pnpm through Corepack, Python 3.12 with the asset-build modules,
-# ffmpeg, Arial for the font atlas, and the pinned Nomad. The checkout is
-# bind-mounted, not copied, so builds and state land in the same .generated
-# and .state folders a native run uses.
+# Linux images with the tools docs/GETTING_STARTED.md lists, in two targets:
+#
+#   stack    Go, Node.js with pnpm through Corepack, Python 3.12 with the
+#            asset-build modules and the pinned Nomad: enough to run the
+#            stack on game data that is already built. amd64 and arm64.
+#   assets   stack plus what the asset build adds: ffmpeg, Arial for the
+#            font atlas, Mesa's Vulkan drivers and Google Chrome. amd64
+#            only, because Google publishes Chrome for amd64 only.
+#
+# docker/configure.sh picks the target (SRO_DOCKER_TARGET in .env). The
+# checkout is bind-mounted, not copied, so builds and state land in the
+# same .generated and .state folders a native run uses.
 #
 # Nomad stays the process owner inside the container: docker/entrypoint.sh
 # runs the documented dev-agent / bootstrap / deploy sequence and never
@@ -20,7 +27,7 @@ ARG UV_VERSION=0.9.5
 FROM node:${NODE_VERSION}-trixie AS node
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
-FROM golang:${GO_VERSION}-trixie
+FROM golang:${GO_VERSION}-trixie AS toolchain
 
 # Nomad must be the version sro-nomad dev-agent pins; pnpm the one
 # package.json packageManager names.
@@ -32,32 +39,10 @@ ARG TARGETARCH
 ARG UID=1000
 ARG GID=1000
 
-# ffmpeg converts the client music, unar opens a client shipped as .rar,
-# e2fsprogs' chattr makes the extraction folder case-insensitive
-# (entrypoint.sh casefold_extracted), Mesa's Vulkan drivers let Chrome use
-# a host Intel or AMD GPU (docker/compose.gpu.yaml), and the Microsoft core
-# fonts (Debian contrib) supply the Arial face that
-# scripts/build/native_ui_font_atlas.py looks for on Linux.
-RUN sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources \
-	&& echo 'ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true' | debconf-set-selections \
-	&& apt-get update \
-	&& apt-get install -y --no-install-recommends e2fsprogs ffmpeg mesa-vulkan-drivers ttf-mscorefonts-installer unar unzip \
-	&& rm -rf /var/lib/apt/lists/* \
-	&& test -f /usr/share/fonts/truetype/msttcorefonts/Arial.ttf \
-	&& test -f /usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf
-
-# Google Chrome: the asset build renders monster and catalogue portraits in
-# it (scripts/lib/probeBrowser.mjs launches the "chrome" channel), from
-# Google's signed repository. Google publishes it for amd64 only.
-RUN test "${TARGETARCH}" = amd64 \
-	&& curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
-		| gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
-	&& echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
-		> /etc/apt/sources.list.d/google-chrome.list \
-	&& apt-get update \
-	&& apt-get install -y --no-install-recommends google-chrome-stable \
-	&& rm -rf /var/lib/apt/lists/* \
-	&& google-chrome --version
+# unzip unpacks the Nomad release below.
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends unzip \
+	&& rm -rf /var/lib/apt/lists/*
 
 # Node.js and its bundled npm and Corepack, taken from the official image.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
@@ -104,6 +89,54 @@ RUN groupadd -o -g ${GID} sro \
 ENV GOMODCACHE=/cache/go/mod \
 	GOCACHE=/cache/go/build \
 	pnpm_config_store_dir=/cache/pnpm-store
+
+# ---------------------------------------------------------------------------
+# stack: runs the stack; `assets` refuses to start in it.
+# ---------------------------------------------------------------------------
+FROM toolchain AS stack
+
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/sro-docker
+USER sro
+ENTRYPOINT ["sro-docker"]
+CMD ["stack"]
+
+# ---------------------------------------------------------------------------
+# assets: also builds the game data from the licensed client.
+# ---------------------------------------------------------------------------
+FROM toolchain AS assets
+
+ARG TARGETARCH
+
+# ffmpeg converts the client music, unar opens a client shipped as .rar,
+# e2fsprogs' chattr makes the extraction folder case-insensitive
+# (entrypoint.sh casefold_extracted), Mesa's Vulkan drivers let Chrome use
+# a host Intel or AMD GPU (docker/compose.gpu.yaml), and the Microsoft core
+# fonts (Debian contrib) supply the Arial face that
+# scripts/build/native_ui_font_atlas.py looks for on Linux. The fonts
+# package downloads the fonts themselves from SourceForge.
+RUN sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources \
+	&& echo 'ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true' | debconf-set-selections \
+	&& apt-get update \
+	&& apt-get install -y --no-install-recommends e2fsprogs ffmpeg mesa-vulkan-drivers ttf-mscorefonts-installer unar \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& test -f /usr/share/fonts/truetype/msttcorefonts/Arial.ttf \
+	&& test -f /usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf
+
+# Google Chrome: the asset build renders monster and catalogue portraits in
+# it (scripts/lib/probeBrowser.mjs launches the "chrome" channel), from
+# Google's signed repository. Google publishes it for amd64 only.
+RUN if [ "${TARGETARCH}" != amd64 ]; then \
+		echo "Google Chrome is published for amd64 only; build the stack target (SRO_DOCKER_TARGET=stack)" >&2; \
+		exit 1; \
+	fi \
+	&& curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+		| gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+	&& echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+		> /etc/apt/sources.list.d/google-chrome.list \
+	&& apt-get update \
+	&& apt-get install -y --no-install-recommends google-chrome-stable \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& google-chrome --version
 
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/sro-docker
 USER sro

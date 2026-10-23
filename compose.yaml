@@ -19,6 +19,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+      # assets where Google Chrome exists (amd64), stack elsewhere
+      # (docker/Dockerfile); configure.sh writes it.
+      target: ${SRO_DOCKER_TARGET:-assets}
       args:
         UID: ${SRO_DOCKER_UID:?run docker/configure.sh first}
         GID: ${SRO_DOCKER_GID:?run docker/configure.sh first}
@@ -32,6 +35,12 @@ services:
     # restarts pids at 1 on every start, so an old pid would soon name a new
     # process and lock the world out.
     pid: host
+    # On SELinux hosts (Fedora, RHEL) the bind mounts below would need
+    # relabelling before the container could read them; this container
+    # already shares the host's network and pids, so it skips the SELinux
+    # separation instead. Hosts without SELinux ignore it.
+    security_opt:
+      - label=disable
     # sro-nomad stop waits out each task's kill timeout (90s) before Nomad
     # itself shuts down.
     stop_grace_period: 3m
@@ -46,7 +55,8 @@ services:
       # Without a host GPU headless Chrome offers WebGPU only on its
       # SwiftShader software adapter, and only with this switch
       # (scripts/lib/probeBrowser.mjs). docker/compose.gpu.yaml replaces it
-      # when configure.sh finds a GPU; the asset build's portraits need one.
+      # when configure.sh finds an Intel or AMD GPU; the asset build's
+      # portraits need one.
       SRO_PROBE_EXTRA_CHROME_ARGS: --enable-unsafe-webgpu
       # Passed through only when set on the host.
       SRO_BUILD_JOBS:
@@ -73,22 +83,9 @@ services:
         target: ${SRO_DOCKER_GAME_ROOT}
         bind:
           create_host_path: false
-      # The client's extracted/ folder, case-insensitive (see below).
-      - type: volume
-        source: extracted
-        target: ${SRO_DOCKER_GAME_ROOT}/extracted
+      # docker/compose.casefold.yaml mounts a case-insensitive extracted/
+      # over this folder when the kernel supports it.
       - cache:/cache
 
 volumes:
   cache:
-  # The asset build was written for case-insensitive filesystems (Windows,
-  # macOS): it opens regioninfo.txt for the client's RegionInfo.txt and
-  # c_rudolph.bsk for c_rudolph.BSK. extracted/ therefore lives on a
-  # casefold tmpfs (Linux 6.13 or newer). It holds only what one `assets`
-  # run extracts: Docker unmounts it, and drops its contents, when the last
-  # container using it stops. Nothing reads extracted/ after the build.
-  extracted:
-    driver_opts:
-      type: tmpfs
-      device: tmpfs
-      o: size=8g,uid=${SRO_DOCKER_UID},gid=${SRO_DOCKER_GID},casefold

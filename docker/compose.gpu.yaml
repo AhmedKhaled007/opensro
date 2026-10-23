@@ -7,8 +7,10 @@
 # portrait target ("No portrait target __doll"), and the build fails.
 #
 # docker/configure.sh adds this file through COMPOSE_FILE when the host has
-# /dev/dri, with the group ids that own its device nodes. Mesa's Vulkan
-# drivers in the image cover Intel and AMD GPUs.
+# a GPU on a driver the image's Mesa Vulkan drivers cover (i915 or xe for
+# Intel, amdgpu for AMD), with the group ids that own its device nodes. All
+# of /dev/dri is passed in; Mesa ignores nodes it has no driver for, such as
+# an NVIDIA GPU beside the Intel one.
 # ===========================================================================
 
 services:

@@ -1,0 +1,30 @@
+# ===========================================================================
+# compose.casefold.yaml - a case-insensitive extracted/ for the asset build
+#
+# The asset build was written for case-insensitive filesystems (Windows,
+# macOS): it opens regioninfo.txt for the client's RegionInfo.txt and
+# c_rudolph.bsk for c_rudolph.BSK. extracted/ therefore lives on a casefold
+# tmpfs, which needs Linux 6.13 or newer. On an older kernel Docker cannot
+# mount it, and every container using it fails to start, so this file is
+# separate from compose.yaml: docker/configure.sh adds it through
+# COMPOSE_FILE only when the kernel offers /sys/fs/tmpfs/features/casefold.
+#
+# It holds only what one `assets` run extracts: Docker unmounts it, and
+# drops its contents, when the last container using it stops. Nothing reads
+# extracted/ after the build. The tmpfs takes RAM only for what it holds,
+# up to SRO_DOCKER_EXTRACTED_SIZE (8g unless .env sets it).
+# ===========================================================================
+
+services:
+  sro:
+    volumes:
+      - type: volume
+        source: extracted
+        target: ${SRO_DOCKER_GAME_ROOT:?run docker/configure.sh first}/extracted
+
+volumes:
+  extracted:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=${SRO_DOCKER_EXTRACTED_SIZE:-8g},uid=${SRO_DOCKER_UID:?run docker/configure.sh first},gid=${SRO_DOCKER_GID:?run docker/configure.sh first},casefold
