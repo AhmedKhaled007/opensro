@@ -701,6 +701,7 @@ import {
 	guildQuestionLayout,
 	reverseReturnLayout,
 	proposalLayout,
+	reverseReturnButton,
 	MESSAGE_FRAME,
 	MESSAGE_TILE,
 	PARTY_OPTION
@@ -5586,16 +5587,23 @@ export function createUi(
 			}
 			if ( reverseScrollHud.reconcile( view ) ) dirty = true;
 			if ( reverseScrollHud.active() ) {
+				const boxControl = ( id: string | null ) =>
+					id !== null &&
+					[ "reverse-scroll:2", "reverse-scroll:3", "reverse-scroll-map", "reverse-scroll-cancel" ].includes(
+						id
+					);
 				if ( event.kind === "key" && event.code === "Escape" ) {
 					reverseScrollHud.close();
 					dirty = true;
-				} else if (
-					event.kind === "activate" &&
-					[ "reverse-scroll:2", "reverse-scroll:3", "reverse-scroll-map", "reverse-scroll-cancel" ].includes(
-						event.id
-					)
-				) {
+				} else if ( event.kind === "activate" && boxControl( event.id ) ) {
 					activate( event.id );
+				} else if ( event.kind === "hover" || event.kind === "press" ) {
+					// The pointer still reaches the box's own controls (their focus
+					// art and the rows' hover color); nothing behind it lights up.
+					const id = boxControl( event.id ) ? event.id : null;
+					if ( event.kind === "hover" ) hover = id;
+					else pressed = id;
+					dirty = true;
 				}
 				// Message box 0x1E owns input until a destination or Cancel wins.
 				return;
@@ -15073,20 +15081,13 @@ export function createUi(
 					);
 					endWindow( admission, "composite-item" );
 				}
-				// 6AD990's type 0x24 confirm box and the scroll's box 0x1E (6971B0)
-				// share the layout: the reverse return's two points and Cancel.
+				// The bag scroll's box (561D50 opens type 0x21 at 562251) and
+				// 6AD990's type 0x24 box are one box: 52F460 runs 53259C for both,
+				// the reverse return's two points and Cancel.
 				const reverseBox = game?.reverseReturnChoice ?
-					{
-						title: "UIIT_CTL_PREMIUM_REVERSE_RETURN",
-						prefix: "premium-reverse:",
-						cancel: "premium-reverse-cancel"
-					} :
+					{ prefix: "premium-reverse:", cancel: "premium-reverse-cancel" } :
 					reverseScrollHud.active() ?
-					{
-						title: "UIIT_MSG_QUESTION_SILKMALL_ITEM_USE_REVERSE_PORTAL",
-						prefix: "reverse-scroll:",
-						cancel: "reverse-scroll-cancel"
-					} :
+					{ prefix: "reverse-scroll:", cancel: "reverse-scroll-cancel" } :
 					null;
 				if ( reverseBox ) {
 					controls = [];
@@ -15104,41 +15105,54 @@ export function createUi(
 						)
 					);
 					quads.push( ...normalTile( box.background, MESSAGE_TILE, resources.size( MESSAGE_TILE ), full ) );
+					// 53259C titles the box UIIT_STT_CONFIRM_BOX; 532611 puts the
+					// question in id 1.
 					quads.push(
-						...text.quads( hudCopy( reverseBox.title ), box.title, full, white, {
+						...text.quads( hudCopy( "UIIT_STT_CONFIRM_BOX" ), box.title, full, white, {
 							hAlign: 1,
 							vAlign: 0
 						} )
 					);
-					for (
-						const [index, choice, key] of [
-							[ 0, REVERSE_RETURN_LAST_RECALL, "UIIT_MSG_ITEM_USE_REVERSE_PORTAL_RETRUN_TO_LAST_RETURN" ],
-							[ 1, REVERSE_RETURN_LAST_DEATH, "UIIT_MSG_ITEM_USE_REVERSE_PORTAL_RETRUN_TO_LAST_DEATH" ]
-						] as const
-					) {
-						button(
-							reverseBox.prefix + choice,
-							hudCopy( key ),
-							box.frame[0] + 16,
-							box.frame[1] + 44 + index * 26,
-							box.frame[2] - 32
-						);
-					}
+					quads.push(
+						...text.quads(
+							hudCopy( "UIIT_MSG_QUESTION_SILKMALL_ITEM_USE_REVERSE_PORTAL" ),
+							box.question,
+							full,
+							white,
+							{ hAlign: 1, vAlign: 0 }
+						)
+					);
+					authoredLabeledButton(
+						reverseReturnButton( box.points[0]! ),
+						0,
+						0,
+						reverseBox.prefix + REVERSE_RETURN_LAST_RECALL,
+						hudCopy( "UIIT_MSG_ITEM_USE_REVERSE_PORTAL_RETRUN_TO_LAST_RETURN" )
+					);
+					authoredLabeledButton(
+						reverseReturnButton( box.points[1]! ),
+						0,
+						0,
+						reverseBox.prefix + REVERSE_RETURN_LAST_DEATH,
+						hudCopy( "UIIT_MSG_ITEM_USE_REVERSE_PORTAL_RETRUN_TO_LAST_DEATH" )
+					);
 					if ( mapRow ) {
-						button(
+						authoredLabeledButton(
+							reverseReturnButton( box.points[2]! ),
+							0,
+							0,
 							"reverse-scroll-map",
-							"Move to a location on the map.",
-							box.frame[0] + 16,
-							box.frame[1] + 44 + 2 * 26,
-							box.frame[2] - 32
+							"Move to a location on the map."
 						);
 					}
-					button(
+					// 5327AE captions id 201 UIO_COMMON_CTL_CANCEL; the port's text
+					// tables carry its English twin, UIIT_CTL_CANCEL ("Cancel").
+					authoredLabeledButton(
+						reverseReturnButton( box.refuse ),
+						0,
+						0,
 						reverseBox.cancel,
-						hudCopy( "UIIT_CTL_CANCEL" ),
-						box.refuse[0],
-						box.refuse[1],
-						box.refuse[2]
+						hudCopy( "UIIT_CTL_CANCEL" )
 					);
 					endWindow( admission, "premium-reverse-return" );
 				}
