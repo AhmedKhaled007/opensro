@@ -10016,7 +10016,8 @@ export function createUi(
 					rightActivate: !!item && (id.startsWith( "slot:" ) || id.startsWith( "storage-slot:" )),
 					draggable: !!item && !repairHud.armed() && cosHud.itemTargetCursor() === null,
 					carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item &&
-						ITEM_SLOT_PREFIXES.some( prefix => id.startsWith( prefix ) )
+						ITEM_SLOT_PREFIXES.some( prefix => id.startsWith( prefix ) ),
+					inspect: !!item && experimental.state().saved.touchInspect
 				} );
 				itemCount( item, r );
 			}
@@ -13553,7 +13554,8 @@ export function createUi(
 							selected: inventorySlot === slot,
 							rightActivate: !!item || repairHud.armed(),
 							draggable: !!item && !repairHud.armed() && cosHud.itemTargetCursor() === null,
-							carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item
+							carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item,
+							inspect: !!item && experimental.state().saved.touchInspect
 						} );
 						if ( enabled && item ) {
 							for (
@@ -13663,7 +13665,8 @@ export function createUi(
 								disabled: attachmentBlocked,
 								rightActivate: !!item || repairHud.armed(),
 								draggable: !!item && !repairHud.armed() && cosHud.itemTargetCursor() === null,
-								carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item
+								carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item,
+								inspect: !!item && experimental.state().saved.touchInspect
 							} );
 						}
 					}
@@ -14018,7 +14021,8 @@ export function createUi(
 								rightActivate: !restoring && !!owned &&
 									(hudData.tooltipSkills.get( entry.id )?.basicActivity ?? 0) !== 0,
 								draggable: !!owned && (hudData.tooltipSkills.get( entry.id )?.basicActivity ?? 0) !== 0,
-								selected: entry.id === selectedSkill
+								selected: entry.id === selectedSkill,
+								inspect: experimental.state().saved.touchInspect
 							} );
 							if ( owned ) {
 								const tab = ROOT + "interface/skill/skl_level_tab.png";
@@ -16679,7 +16683,8 @@ export function createUi(
 									kind: "button",
 									disabled: busy,
 									rightActivate: !!item,
-									draggable: !!item && !busy
+									draggable: !!item && !busy,
+									inspect: !!item && experimental.state().saved.touchInspect
 								} );
 							} );
 							[
