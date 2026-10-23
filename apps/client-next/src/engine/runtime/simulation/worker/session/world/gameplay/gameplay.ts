@@ -281,6 +281,7 @@ import { createCombat } from "./combat/combat";
 import { createTargeting } from "./targeting/targeting";
 import { createMoveReservation } from "./reservation/reservation";
 import { createBetaPlayerMap } from "./beta-map/beta-map";
+import { createUniqueDamageRank } from "./unique-rank/unique-rank";
 import { createPetTraining } from "./pet-training/pet-training";
 import type { GameplayCommand, GameplayState } from "@/engine/contracts/gameplay";
 import type { EntityState } from "@/engine/contracts/world";
@@ -478,6 +479,7 @@ export function createGameplay(
 		targeting = createTargeting( send ),
 		moveReservation = createMoveReservation(),
 		betaMap = createBetaPlayerMap(),
+		uniqueRank = createUniqueDamageRank(),
 		// The wolf tree's worn gear resolves through the bag's references.
 		petTraining = createPetTraining( ( ref, slot, magic ) => inventory.petGearItem( ref, slot, magic ) );
 	/*
@@ -1104,6 +1106,7 @@ selected entities, cooldowns or world-entry state.
 		groundSkillMoveSuppressUntil = 0;
 		moveReservation.clear();
 		betaMap.clear();
+		uniqueRank.clear();
 		petTraining.clear();
 		partyMatching = emptyPartyMatching();
 		entryVitals = {};
@@ -3126,6 +3129,10 @@ Packet handling must not depend on which HUD panel is currently open.
 					dirty = true;
 					return true;
 				}
+				if ( uniqueRank.receive( frame, uniqueRefs ) ) {
+					dirty = true;
+					return true;
+				}
 				if ( petTraining.receive( frame, now ) ) {
 					dirty = true;
 					return true;
@@ -4760,6 +4767,7 @@ The published plane when something changed since the last take, else null.
 				flagWar: { timerEndsAt: flagWarTimerEndsAt, carrierGid: flagWarCarrierGid },
 				...skillPress.state(),
 				betaPlayers: betaMap.players(),
+				uniqueDamageRank: uniqueRank.current(),
 				petTraining: petTraining.state(),
 				petTailwind: petTraining.tailwind(),
 				petGuidance: petTraining.guidance(),
