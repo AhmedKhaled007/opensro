@@ -28,6 +28,11 @@
 *.obj
 *.pdb
 
+# The role binaries `sro-nomad deploy -build` writes before staging them;
+# off Windows they carry no .exe suffix.
+/agent
+/gameworld
+
 # Test binaries built with `go test -c`.
 *.test
 

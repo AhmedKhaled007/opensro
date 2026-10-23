@@ -1,0 +1,4 @@
+# The checkout is bind-mounted at run time; the image needs only these.
+*
+!requirements-build.txt
+!docker/entrypoint.sh
