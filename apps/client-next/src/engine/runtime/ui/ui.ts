@@ -8625,7 +8625,7 @@ export function createUi(
 					// 6A01B0: logout writes them back before the session's windows go.
 					persistWindowPositions();
 					guildWarHud.reset( true );
-					uniqueRankHud.reset( true );
+					uniqueRankHud.reset();
 					windowPlacement.reset();
 					itemMall.reset();
 					carriedShortcut = null;
