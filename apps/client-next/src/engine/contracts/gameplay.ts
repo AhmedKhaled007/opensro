@@ -681,6 +681,37 @@ export interface BetaMapPlayer {
 }
 /*
 ================
+UniqueDamageRow
+
+One ranked player of a unique kill (port-only 0x3FB7; unique-rank.ts). A
+party rank of 0 means the player was in no party.
+================
+*/
+export interface UniqueDamageRow {
+	readonly name: string;
+	readonly damage: number;
+	readonly partyRank: number;
+}
+/*
+================
+UniqueDamageRank
+
+The latest unique kill's damage ranking as this player received it. The
+sequence rises with every ranking, so the window opens once per kill.
+================
+*/
+export interface UniqueDamageRank {
+	readonly sequence: number;
+	readonly refObjId: number;
+	readonly uniqueName: string;
+	readonly total: number;
+	readonly rows: readonly UniqueDamageRow[];
+	readonly selfRank: number;
+	readonly selfDamage: number;
+	readonly selfPartyRank: number;
+}
+/*
+================
 GameplayState
 
 Worker publications may omit unchanged catalog, social and shop values.
@@ -690,6 +721,8 @@ Presentation owns the derived skillIndex; it never travels back to simulation.
 export interface GameplayState {
 	readonly itemMall?: import("./item-mall").MallState;
 	readonly betaPlayers?: readonly BetaMapPlayer[];
+	// Port-only damage ranking of the latest unique kill (unique-rank.ts).
+	readonly uniqueDamageRank?: UniqueDamageRank | null;
 	// Port-only wolf skill tree of the pet window's wolf (pet-training.ts).
 	readonly petTraining?: PetTraining;
 	/** RefObjIDs the server never spends (the beta starter kit), drawn as unlimited. */
