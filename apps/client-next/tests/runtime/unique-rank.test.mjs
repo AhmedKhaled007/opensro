@@ -150,8 +150,15 @@ test("the window opens once per ranking and again in a new session", () => {
 	assert.equal( hud.state(), null );
 	const next = { ...ranking, sequence: 2 };
 	assert.equal( hud.reconcile( { uniqueDamageRank: next } ), true );
-	hud.reset( true );
+
+	// Leaving the world (a teleport) closes the window, and the ranking the
+	// worker still publishes on arrival does not reopen it.
+	hud.reset();
 	assert.equal( hud.state(), null );
+	assert.equal( hud.reconcile( { uniqueDamageRank: next } ), false );
+
+	// A cleared worker publishes null; its numbering may start again at 1.
+	assert.equal( hud.reconcile( { uniqueDamageRank: null } ), false );
 	assert.equal( hud.reconcile( { uniqueDamageRank: ranking } ), true );
 });
 
@@ -182,5 +189,43 @@ test("the production UI draws the ranking and closes it", t => {
 	f.ui.event( { kind: "activate", id: "unique-rank-ok" } );
 	for ( let i = 0; i < 2; i++ ) view = f.ui.step( f.state, now += 100 ) ?? view;
 	assert.ok( !defined( view ).controls.some( control => control.id === "unique-rank-close" ) );
+	assert.ok( !f.hasText( "Tiger Girl defeated" ) );
+});
+
+test("a teleport does not reopen a closed ranking", t => {
+	const f = uiFixture();
+	t.after( () => f.dispose() );
+	let now = 0;
+	let view;
+	const settle = steps => {
+		for ( let i = 0; i < steps; i++ ) view = f.ui.step( f.state, now += 100 ) ?? view;
+		return defined( view );
+	};
+	const open = () => settle( 1 ).controls.some( control => control.id === "unique-rank-close" );
+	settle( 12 );
+	Object.assign( f.state.gameplay, {
+		uniqueDamageRank: {
+			sequence: 1,
+			refObjId: TIGER_GIRL,
+			uniqueName: "Tiger Girl",
+			total: 1000,
+			rows: ROWS,
+			selfRank: 2,
+			selfDamage: 300,
+			selfPartyRank: 0
+		}
+	} );
+	settle( 4 );
+	assert.ok( open() );
+	f.ui.event( { kind: "activate", id: "unique-rank-close" } );
+	settle( 2 );
+	assert.ok( !open() );
+
+	// The loading screen and arrival: the worker still publishes the ranking.
+	f.state.session = { ...f.state.session, phase: "entering-world", revision: f.state.session.revision + 1 };
+	settle( 4 );
+	f.state.session = { ...f.state.session, phase: "world", revision: f.state.session.revision + 1 };
+	settle( 4 );
+	assert.ok( !open() );
 	assert.ok( !f.hasText( "Tiger Girl defeated" ) );
 });

@@ -7,6 +7,11 @@ Opens once for every ranking the worker publishes (0x3FB7, sent only with
 SRO_UNIQUE_DAMAGE_RANK on) and stays open until the player closes it. A
 newer kill replaces the open ranking. The original has no such window.
 
+Which rankings are new is decided by the worker's publication alone, never
+by the UI phase: a teleport leaves and re-enters the world phase while the
+worker still publishes the last ranking, so resetting on the phase
+reopened it after every teleport.
+
 ===========================================================================
 */
 import type { GameplayState, UniqueDamageRank } from "@/engine/contracts/gameplay";
@@ -32,10 +37,14 @@ export function createUniqueRankHud() {
 
 		A ranking newer than the last one opens the window; one already seen
 		never reopens it after the player closed it. True when it opened.
+		The worker publishes null only once its state is cleared (a session
+		reset, or a new world session whose numbering starts from 1 again),
+		so only null forgets what was seen.
 		================
 		*/
 		reconcile( gameplay: Pick<GameplayState, "uniqueDamageRank"> | null | undefined ): boolean {
 			const next = gameplay?.uniqueDamageRank;
+			if ( next === null ) seen = 0;
 			if ( !next || next.sequence <= seen ) return false;
 			shown = next;
 			seen = next.sequence;
@@ -53,12 +62,12 @@ export function createUniqueRankHud() {
 		================
 		reset
 
-		A new session's worker numbers its rankings from 1 again.
+		Leaving the world closes the window. It keeps what was seen: the
+		same ranking is still published when the player arrives again.
 		================
 		*/
-		reset( sessionEnded = false ) {
+		reset() {
 			shown = null;
-			if ( sessionEnded ) seen = 0;
 		}
 	};
 }
