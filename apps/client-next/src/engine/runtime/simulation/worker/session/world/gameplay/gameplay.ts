@@ -1020,12 +1020,14 @@ selectEntity
 
 Request selection in reach or after approach. A coalesced click has no reply
 coming, so retain its menu, dialogue and lock until a new request.
+692BC8 skips the same NPC only while its window (+0x6D) is visible; after a
+storage action hid it, the click selects again and shows the menu.
 ================
 	*/
 	function selectEntity( entity: EntityState, now: number ) {
 		const frame = targeting.select( entity.gid, now, entity.kind, {
 			fortress: !!entity.teleport?.fortressId,
-			reopen: npcConversation.state().phase === "closed"
+			reopen: npcConversation.state().phase === "closed" || npcConversation.window().hidden
 		} );
 		if ( frame ) npcConversation.clear();
 		markTarget( entity );

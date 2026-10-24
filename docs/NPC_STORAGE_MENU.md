@@ -17,6 +17,7 @@ here depends on a reverse-engineering function name or a server binary.
 | Guild storage also hides the parent before requesting its function. | Action `0x1D` routes to `0x5DAFA9`; `0x5DAFA9–0x5DAFB8` hides the parent. `0x5DAFBB` starts request `0x7338`, with function `0x4000` at `0x5DB021`. | instruction-checked |
 | Hiding the NPC window does not release the interaction. | The storage action paths above continue into their service requests. Vtable `0xBE3A34` has `0x5DBE00` at slot `+0x58` (`0xBE3A8C`); its hide path performs UI cleanup and delegates to base visibility (`0x53D420` at `0x5DBEA1`), not an NPC release. | instruction-checked |
 | A fresh NPC selection prepares its menu independently of storage-panel selection. | The selection handler at `0x7650C5–0x7650DC` prepares the NPC window through `0x5DBCE0(1)` and sets the selected entity through `0x5DC290`. `0x5DBCE0` hides then shows its talk child for mode 1. | instruction-checked |
+| Clicking the same NPC selects it again only while its window is hidden. | `0x692BC8` fetches the NPC window and reads its visible byte `+0x6D` (`0x9FCDA0`), which the base visibility setter `0x53D420` writes through `0x9FCD70`. Only when the window is visible and its stored NPC (`+0x7C4`, `0x5DBD70`) matches the click does it skip; otherwise it requests `0x745A` at `0x692C18`. | instruction-checked |
 
 The port stores a versioned NPC-window visibility receipt in the conversation
 owner. The HUD hides immediately on the click; the worker also hides before
@@ -28,6 +29,7 @@ panel has no authority to show the NPC window.
 `npc-storage-window.test.mjs` exercises request ordering, personal storage's
 cached and uncached paths, guild storage, preserved target and interaction
 lock, delayed worker receipts, panel changes, scroll rejection while hidden,
-and reselection of the same NPC without an intermediate closed snapshot.
+reselection of the same NPC without an intermediate closed snapshot, and
+clicking the same NPC again after storage hid its window.
 These tests execute the shipped port; the native evidence is static analysis,
 not a full client emulation.

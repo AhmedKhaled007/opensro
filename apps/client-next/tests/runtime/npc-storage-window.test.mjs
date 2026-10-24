@@ -26,6 +26,7 @@ const NPC = { gid: 7, refObjId: 1, kind: "npc", regionId: 1, x: 0, y: 0, z: 0, h
 const STORAGE_LIST_REQUEST = 0x72c3;
 const NPC_ACTION = 0x7338;
 const NPC_RELEASE = 0x74b3;
+const TARGET_REQUEST = 0x745a;
 const PERSONAL_STORAGE = 4;
 const GUILD_STORAGE = 0x4000;
 
@@ -183,6 +184,31 @@ test("hidden NPC menus survive panel changes and coalesced reselection shows the
 		assert.ok( draw().some( control => control.id === "storage-open" ), "new selection shows the menu" );
 	} finally {
 		hud.dispose();
+		f.game.dispose();
+	}
+});
+
+test("clicking the same NPC again requests selection only while its window is hidden", () => {
+	const f = storageFixture();
+	/*
+	================
+	selectRequests
+	================
+	*/
+	const selectRequests = () => f.frames.filter( frame => frame.opcode === TARGET_REQUEST ).length;
+	try {
+		const initial = selectRequests();
+		f.command( { kind: "select", gid: NPC.gid } );
+		assert.equal( selectRequests(), initial, "a visible menu suppresses the repeated click" );
+		f.command( { kind: "storage-open", gid: NPC.gid } );
+		f.openPersonalRoom();
+		f.command( { kind: "storage-close" } );
+		assert.equal( f.read().npcWindow.hidden, true );
+		f.select();
+		assert.equal( selectRequests(), initial + 1, "a hidden menu lets the click select again" );
+		assert.equal( f.read().npcWindow.hidden, false );
+		assert.equal( f.read().npcConversation.phase, "menu" );
+	} finally {
 		f.game.dispose();
 	}
 });
