@@ -9122,7 +9122,10 @@ export function createUi(
 				compositePackage !== null &&
 				!(phase === "world" && next.gameplay?.countJobs?.some( r => r.packageRefObjId === compositePackage ))
 			) compositeItemHud.close();
-			if ( phase === "world" && uniqueRankHud.reconcile( next.gameplay ) ) dirty = true;
+			if (
+				phase === "world" &&
+				uniqueRankHud.reconcile( next.gameplay, experimental.state().saved.uniqueDamageRank )
+			) dirty = true;
 			if ( phase !== "world" ) cosHud.reset();
 			else if (
 				cosHud.reconcile(

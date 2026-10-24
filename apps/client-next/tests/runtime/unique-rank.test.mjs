@@ -21,6 +21,20 @@ const { uniqueRankLines, groupedDamage, damageShare, partyPlace } = await import
 	"../../src/engine/foundation/gameplay/unique-rank.ts"
 );
 const { createUniqueRankHud } = await import( "../../src/engine/runtime/ui/hud/unique-rank-hud.ts" );
+const { experimentalOptions } = await import( "../../src/engine/foundation/ui/experimental-options.ts" );
+
+/*
+================
+rankingFixture
+
+The production UI with the Experimental ranking row set as given.
+================
+*/
+function rankingFixture( enabled ) {
+	const f = uiFixture();
+	f.ui.event( { kind: "experimental-preferences", value: experimentalOptions( { uniqueDamageRank: enabled } ) } );
+	return f;
+}
 
 const TIGER_GIRL = 1954;
 const REFS = new Map( [ [ TIGER_GIRL, { symbol: "SN_MOB_CH_TIGERWOMAN", name: "Tiger Girl" } ] ] );
@@ -142,28 +156,28 @@ test("the window opens once per ranking and again in a new session", () => {
 		selfDamage: 0,
 		selfPartyRank: 0
 	};
-	assert.equal( hud.reconcile( { uniqueDamageRank: null } ), false );
-	assert.equal( hud.reconcile( { uniqueDamageRank: ranking } ), true );
+	assert.equal( hud.reconcile( { uniqueDamageRank: null }, true ), false );
+	assert.equal( hud.reconcile( { uniqueDamageRank: ranking }, true ), true );
 	assert.equal( hud.state(), ranking );
 	hud.close();
-	assert.equal( hud.reconcile( { uniqueDamageRank: ranking } ), false );
+	assert.equal( hud.reconcile( { uniqueDamageRank: ranking }, true ), false );
 	assert.equal( hud.state(), null );
 	const next = { ...ranking, sequence: 2 };
-	assert.equal( hud.reconcile( { uniqueDamageRank: next } ), true );
+	assert.equal( hud.reconcile( { uniqueDamageRank: next }, true ), true );
 
 	// Leaving the world (a teleport) closes the window, and the ranking the
 	// worker still publishes on arrival does not reopen it.
 	hud.reset();
 	assert.equal( hud.state(), null );
-	assert.equal( hud.reconcile( { uniqueDamageRank: next } ), false );
+	assert.equal( hud.reconcile( { uniqueDamageRank: next }, true ), false );
 
 	// A cleared worker publishes null; its numbering may start again at 1.
-	assert.equal( hud.reconcile( { uniqueDamageRank: null } ), false );
-	assert.equal( hud.reconcile( { uniqueDamageRank: ranking } ), true );
+	assert.equal( hud.reconcile( { uniqueDamageRank: null }, true ), false );
+	assert.equal( hud.reconcile( { uniqueDamageRank: ranking }, true ), true );
 });
 
 test("the production UI draws the ranking and closes it", t => {
-	const f = uiFixture();
+	const f = rankingFixture( true );
 	t.after( () => f.dispose() );
 	let now = 0;
 	let view;
@@ -193,7 +207,7 @@ test("the production UI draws the ranking and closes it", t => {
 });
 
 test("a teleport does not reopen a closed ranking", t => {
-	const f = uiFixture();
+	const f = rankingFixture( true );
 	t.after( () => f.dispose() );
 	let now = 0;
 	let view;
@@ -227,5 +241,54 @@ test("a teleport does not reopen a closed ranking", t => {
 	f.state.session = { ...f.state.session, phase: "world", revision: f.state.session.revision + 1 };
 	settle( 4 );
 	assert.ok( !open() );
+	assert.ok( !f.hasText( "Tiger Girl defeated" ) );
+});
+
+test("the window shows only with the Experimental row on", () => {
+	const hud = createUniqueRankHud();
+	const ranking = {
+		sequence: 1,
+		refObjId: 1,
+		uniqueName: "",
+		total: 1,
+		rows: [],
+		selfRank: 0,
+		selfDamage: 0,
+		selfPartyRank: 0
+	};
+	// Off: the ranking is consumed, so turning the row on never opens an old kill.
+	assert.equal( hud.reconcile( { uniqueDamageRank: ranking }, false ), false );
+	assert.equal( hud.state(), null );
+	assert.equal( hud.reconcile( { uniqueDamageRank: ranking }, true ), false );
+	const next = { ...ranking, sequence: 2 };
+	assert.equal( hud.reconcile( { uniqueDamageRank: next }, true ), true );
+	// Turning the row off closes an open window.
+	hud.reconcile( { uniqueDamageRank: next }, false );
+	assert.equal( hud.state(), null );
+});
+
+test("the row is off by default, and the production UI then never opens it", t => {
+	assert.equal( experimentalOptions().uniqueDamageRank, false );
+	assert.equal( experimentalOptions( { uniqueDamageRank: 1 } ).uniqueDamageRank, false );
+	assert.equal( experimentalOptions( { uniqueDamageRank: true } ).uniqueDamageRank, true );
+	const f = rankingFixture( false );
+	t.after( () => f.dispose() );
+	let now = 0;
+	let view;
+	for ( let i = 0; i < 12; i++ ) view = f.ui.step( f.state, now += 100 ) ?? view;
+	Object.assign( f.state.gameplay, {
+		uniqueDamageRank: {
+			sequence: 1,
+			refObjId: TIGER_GIRL,
+			uniqueName: "Tiger Girl",
+			total: 1000,
+			rows: ROWS,
+			selfRank: 2,
+			selfDamage: 300,
+			selfPartyRank: 0
+		}
+	} );
+	for ( let i = 0; i < 4; i++ ) view = f.ui.step( f.state, now += 100 ) ?? view;
+	assert.ok( !defined( view ).controls.some( control => control.id === "unique-rank-close" ) );
 	assert.ok( !f.hasText( "Tiger Girl defeated" ) );
 });
