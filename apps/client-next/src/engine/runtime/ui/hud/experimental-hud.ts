@@ -96,7 +96,7 @@ export const EXPERIMENTAL_TABS: readonly {
 				key: "safeLoadingScreen",
 				id: "experimental-safe-loading-screen",
 				label: "Safe loading screen",
-				description: "Show only the male warrior loading artwork."
+				description: "Hide inappropriate loading images."
 			}
 		]
 	},
