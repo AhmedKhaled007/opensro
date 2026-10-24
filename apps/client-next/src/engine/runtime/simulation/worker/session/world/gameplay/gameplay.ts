@@ -1885,8 +1885,9 @@ state here before a command can claim a native wire conversation.
 				if ( !localGid || target.target !== command.gid || !((target.targetCapabilities ?? 0) & 4) ) {
 					throw Error( "Select a warehouse NPC" );
 				}
-				storage.open( command.gid );
+				npcConversation.hideWindow();
 				dirty = true;
+				storage.open( command.gid );
 				return null;
 			}
 			if ( command.kind === "storage-open-guild" ) {
@@ -1895,8 +1896,9 @@ state here before a command can claim a native wire conversation.
 				if ( !localGid || target.target !== command.gid || !((target.targetCapabilities ?? 0) & 0x4000) ) {
 					throw Error( "Select a guild manager" );
 				}
-				storage.openGuild( command.gid );
+				npcConversation.hideWindow();
 				dirty = true;
+				storage.openGuild( command.gid );
 				return null;
 			}
 			if ( command.kind === "compensation-dismiss" ) {
@@ -4672,6 +4674,7 @@ The published plane when something changed since the last take, else null.
 			const m = movement.state(), i = inventory.state(), c = combat.state();
 			const npcState = {
 				npcConversation: npcConversation.state(),
+				npcWindow: npcConversation.window(),
 				restorationRevision: npcConversation.restorationRevision()
 			};
 			const cosVital = activeCos ? c.vitals.find( v => v.gid === activeCos!.gid ) : undefined;

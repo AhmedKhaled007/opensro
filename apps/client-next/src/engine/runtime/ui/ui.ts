@@ -3332,6 +3332,7 @@ export function createUi(
 				}
 			} else if ( row === "warehouse" ) {
 				if ( !canLeavePanel() ) return;
+				npcPanel.hide();
 				sendGameplay( { kind: "storage-open-guild", gid: npc } );
 				storagePanel.reset();
 				setPanel( "Storage" );
@@ -5147,6 +5148,7 @@ export function createUi(
 		} else if ( id === "magic-option-cancel" || id === "magic-option-close" ) setPanel( "" );
 		else if ( id === "storage-open" && view.gameplay?.target ) {
 			if ( !canLeavePanel() ) return;
+			npcPanel.hide();
 			sendGameplay( { kind: "storage-open", gid: view.gameplay.target } );
 			storagePanel.reset();
 			setPanel( "Storage" );
@@ -8718,7 +8720,12 @@ export function createUi(
 					undefined,
 				next.gameplay?.social?.soldierAttributeSequence ?? 0
 			);
-			if ( npcPanel.observe( next.session?.phase === "world" ? next.gameplay?.npcConversation : undefined ) ) {
+			if (
+				npcPanel.observe(
+					next.session?.phase === "world" ? next.gameplay?.npcConversation : undefined,
+					next.gameplay?.npcWindow
+				)
+			) {
 				dirty = true;
 			}
 			if ( withdrawal.observe( next.session?.phase === "world" ? next.gameplay?.restorationRevision ?? 0 : 0 ) ) {
@@ -15573,7 +15580,7 @@ export function createUi(
 
 				if (
 					game?.npcConversation && game.npcConversation.phase !== "closed" && hudData &&
-					guideResources.data() && panel !== "Storage" &&
+					guideResources.data() && !npcPanel.hidden() &&
 					!(panel === "Shop" && game.shop?.npc === game.npcConversation.gid)
 				) {
 					const mark = beginWindow(),
