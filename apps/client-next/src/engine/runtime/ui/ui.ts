@@ -743,6 +743,11 @@ const FRAME = ROOT + "interface/frame/mframe_wnd_";
 // squares (ifletterread / ifletterwrite ids 1-6) fill them.
 const LETTER_CHILD_FRAME = ROOT + "interface/messagebox/msgbox2_window_";
 const PARTY_MATCH_RANGE_SEPARATOR_ID = 43;
+const PARTY_MATCH_VISIBLE_ROWS = 12;
+// 63D500 tints all eight slot children (ids 10-17, the MARK icon included)
+// 0xFF87E9FF for the own listing. Port-only, not native: members get the tint
+// on their leader's listing too.
+const PARTY_MATCH_CURRENT_COLOR: UiQuad["color"] = [ 135 / 255, 233 / 255, 1, 1 ];
 // The bug reporter (issue #90): its chat command and its Option window row.
 const BUG_COMMAND = /^\/bug(?:\s+|$)/i;
 const BUG_REPORTS_DISABLED = "Bug reports are disabled on this server.";
@@ -14864,6 +14869,9 @@ export function createUi(
 						slot = hudData.windows.ifpartymatchslot!,
 						social = game?.social,
 						localName = social?.localName ?? next.session?.character ?? "",
+						currentPartyName = social?.leader ?
+							social.members.find( member => member.id === social.leader )?.name ?? "" :
+							localName,
 						buttons = partyMatchButtons( {
 							own: match?.own ?? null,
 							ownName: match?.own ? localName : "",
@@ -14913,14 +14921,22 @@ export function createUi(
 						match?.rows ?? [],
 						partySearch,
 						partyMatchSort,
-						partyMatchDescending
+						partyMatchDescending,
+						currentPartyName
 					);
-					partyMatchOffset = Math.min( partyMatchOffset, Math.max( 0, filtered.length - 12 ) );
+					partyMatchOffset = Math.min(
+						partyMatchOffset,
+						Math.max( 0, filtered.length - PARTY_MATCH_VISIBLE_ROWS )
+					);
+					const pinned = filtered[0]?.name === currentPartyName ? filtered[0] : undefined,
+						visible = pinned ?
+							[ pinned, ...filtered.slice( partyMatchOffset + 1 ) ] :
+							filtered.slice( partyMatchOffset );
 					for (
 						const { row, rect: r } of matchingSlots(
 							page,
 							"CIFPartyMatchSlot",
-							filtered.slice( partyMatchOffset ),
+							visible.slice( 0, PARTY_MATCH_VISIBLE_ROWS ),
 							px,
 							py
 						)
@@ -14932,8 +14948,7 @@ export function createUi(
 						paths.push( ...bar.paths );
 						quads.push( ...bar.quads );
 						if ( !row ) continue;
-						const own = row.name === next.session?.character,
-							color: UiQuad["color"] = own ? [ 135 / 255, 233 / 255, 1, 1 ] : white;
+						const color = row === pinned ? PARTY_MATCH_CURRENT_COLOR : white;
 						const values: Record<string, string> = {
 							ID: String( row.id ),
 							NAME: row.name,
