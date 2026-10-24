@@ -41,6 +41,17 @@ Common eligibility for every wolf bonus; no learned Execute prerequisite.
 ================
 */
 func (rt *Runtime) wolfCompanion(division string, owner *enterworld.Character, gid uint32, now int64) (petCombatStep, bool) {
+	return rt.elementalCompanion(division, owner, gid, "Wolf", now)
+}
+
+/*
+================
+elementalCompanion
+
+Shared port-only PvE eligibility for the wolf and frost caster.
+================
+*/
+func (rt *Runtime) elementalCompanion(division string, owner *enterworld.Character, gid uint32, kind string, now int64) (petCombatStep, bool) {
 	var step petCombatStep
 	if !rt.AttackPetExpansion || rt.Monsters == nil {
 		return step, false
@@ -50,7 +61,7 @@ func (rt *Runtime) wolfCompanion(division string, owner *enterworld.Character, g
 		return step, false
 	}
 	for _, pet := range snapshot.Companions() {
-		if gid != 0 && pet.GID != gid || companion.PetKind(pet.Codename) != "Wolf" || !pet.Summoned || pet.CurrentHP == 0 || !rt.petExpansionAllowed(snapshot, pet) {
+		if gid != 0 && pet.GID != gid || companion.PetKind(pet.Codename) != kind || !pet.Summoned || pet.CurrentHP == 0 || !rt.petExpansionAllowed(snapshot, pet) {
 			continue
 		}
 		state := rt.petSessionFor(division, snapshot.Name, pet.GID)

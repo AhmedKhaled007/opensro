@@ -45,6 +45,8 @@ export function petSkillStack( state: PetTraining, design: PetSkillDesign, skill
 	const c = state.counters;
 	if ( !c ) return null;
 	if ( design.family === "Unbroken Spirit" ) return c.resolve;
+	if ( design.family === "Arcane Resonance" ) return c.penguinResonance ?? null;
+	if ( design.family === "Frozen Hourglass" ) return c.hourglass ?? null;
 	if ( design.family === "Bloodscent" ) return c.wolfBlood ?? null;
 	if ( design.family === "Blood Hunt" ) return c.hunt ?? null;
 	if ( design.family === "Execute" && design.option === 3 ) return c.wolfExecute ?? null;
@@ -95,7 +97,15 @@ export function petOwnerStacks( state: PetTraining | undefined ) {
 		const design = PET_DESIGN.treeSkills.find( d => d.id === skill.id );
 		if ( !design || !skill.live || !skill.slotted || skill.level === 0 || design.option < 2 ) return [];
 		let count: number | undefined, maximum: number, readyText: string;
-		if ( design.family === "Bloodscent" ) {
+		if ( design.family === "Arcane Resonance" ) {
+			count = counters.ownerResonance;
+			maximum = 5;
+			readyText = "Maximum magical attack stacks";
+		} else if ( design.family === "Frozen Hourglass" ) {
+			count = counters.hourglass;
+			maximum = 5;
+			readyText = "Next penguin active recovers 2 seconds of cooldown";
+		} else if ( design.family === "Bloodscent" ) {
 			count = counters.ownerBlood;
 			maximum = design.option === 3 ? 10 : 8;
 			readyText = "Maximum damage stacks";
@@ -113,7 +123,11 @@ export function petOwnerStacks( state: PetTraining | undefined ) {
 			readyText = "Next qualifying hit releases the stun";
 		} else return [];
 		if ( count === undefined ) return [];
-		const ready = count >= maximum - ([ "Bloodscent", "Blood Hunt" ].includes( design.family ) ? 0 : 1);
+		const ready = count >=
+			maximum -
+				([ "Bloodscent", "Blood Hunt", "Arcane Resonance", "Frozen Hourglass" ].includes( design.family ) ?
+					0 :
+					1);
 		const status = ready ? readyText : "Building stacks";
 		return [ {
 			design,

@@ -42,6 +42,9 @@ func petSkillCounterFrame(state *petSession, gid uint32) wire.Frame {
 		blood, ownerBlood = state.wolf.blood[0], state.wolf.blood[1]
 		hunt, target = state.wolf.huntHits, state.wolf.huntTarget
 	}
-	return wire.Frame{Opcode: petSkillCounterOpcode, Payload: wire.NewWriter(17).U32(pet.GID).
-		U8(uint8(attacks)).U8(uint8(bear)).U8(uint8(owner)).U8(resolve).U8(wolf).U8(ownerExecute).U8(blood).U8(ownerBlood).U8(hunt).U32(target).Payload()}
+	payload := wire.NewWriter(20).U32(pet.GID).U8(uint8(attacks)).U8(uint8(bear)).U8(uint8(owner)).U8(resolve).U8(wolf).U8(ownerExecute).U8(blood).U8(ownerBlood).U8(hunt).U32(target).Payload()
+	if companion.PetKind(pet.Codename) == "Penguin" {
+		payload = append(payload, state.penguin.stacks[0], state.penguin.stacks[1], state.penguin.hourglass)
+	}
+	return wire.Frame{Opcode: petSkillCounterOpcode, Payload: payload}
 }

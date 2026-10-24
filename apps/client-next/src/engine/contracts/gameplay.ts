@@ -623,6 +623,9 @@ export interface PetTraining {
 		readonly ownerBlood?: number;
 		readonly hunt?: number;
 		readonly huntTarget?: number;
+		readonly penguinResonance?: number;
+		readonly ownerResonance?: number;
+		readonly hourglass?: number;
 		readonly bearHits: number;
 		readonly ownerHits: number;
 		readonly resolve: number;

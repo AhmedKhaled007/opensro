@@ -224,6 +224,52 @@ function wolfSkillEffectLines( d: PetSkillDesign, value: number ): string[] | nu
 				"Switching prey resets charges",
 				...(d.option === 3 ? [ "Burst: 50% of bonus damage", "Up to 5 other bleeding enemies within 6 m" ] : [])
 			];
+		case "Ice Lance":
+			return [
+				`Magical damage ${v}%`,
+				"Casting range 15 m",
+				"Frostbite chance 40%",
+				...(d.option >= 2 ? [ "Pierces 2 additional enemies" ] : []),
+				...(d.option === 3 ? [ "Frostbitten targets: damage +50%" ] : [])
+			];
+		case "Blizzard":
+			return [
+				`Magical damage ${v}% per pulse`,
+				"4 pulses, one second apart",
+				`Radius ${d.option >= 2 ? 7 : 5} m; maximum targets 8`,
+				...(d.option >= 2 ? [ "Applies frostbite slow" ] : []),
+				...(d.option === 3 ? [ "Freezes enemies hit by all four pulses" ] : []),
+				"Native resistance applies"
+			];
+		case "Shatter":
+			return [
+				`Damage to chilled enemies +${v}%`,
+				d.option >= 2 ? "Penguin and owner" : "Penguin only",
+				...(d.option === 3 ?
+					[ "Frozen kills burst within 5 m", "50% of killing damage; maximum targets 5" ] :
+					[])
+			];
+		case "Arcane Resonance":
+			return [
+				`Magical attack +${v}% per stack`,
+				"Maximum stacks 5; duration 8 s",
+				...(d.option >= 2 ? [ "Owner magic hits build separate stacks" ] : []),
+				...(d.option === 3 ?
+					[
+						"At 5 penguin stacks: next active repeats once",
+						"Consumes penguin stacks; echoes do not build charges"
+					] :
+					[])
+			];
+		case "Frozen Hourglass":
+			return [
+				"Penguin spell hits build charges",
+				...(d.option >= 2 ? [ "Owner magic hits also build charges" ] : []),
+				"Maximum charges 5; once per action",
+				"At 5 charges: next active recovers 2 s",
+				"Shared charges; no charges from echoes or storm pulses",
+				...(d.option === 3 ? [ "Empowered frostbite and storm slow last 2 s longer" ] : [])
+			];
 		default:
 			return null;
 	}
@@ -252,12 +298,6 @@ export function petEffect( design: PetSkillDesign, value: number, effectiveLevel
 		}% for 8 s.`;
 	}
 
-	if ( design.family === "Frost Nova" ) {
-		return `Commanded strike deals ${formatValue( value )}% magical damage to up to 8 targets within ${
-			rank2 ? 7 : 5
-		} m and attempts frostbite. Status duration follows native resistance rules.`;
-	}
-
 	if ( design.family === "Unbroken Spirit" ) {
 		return `Landed monster hits grant Resolve for 15 s, up to 10 stacks. Each stack adds ${
 			formatValue( value )
@@ -279,11 +319,7 @@ export function petEffect( design: PetSkillDesign, value: number, effectiveLevel
 				"") +
 			" Blocked hits and periodic damage do not count. Shielded hits count. Unique monsters are immune.";
 	}
-	if ( design.family === "Static Feathers" ) {
-		return `${formatValue( value )}% chance per attack to spread that strike to up to ${
-			rank2 ? 5 : 3
-		} targets within 8 m, with 20% damage reduction and an electric-shock attempt. No separate lightning spell is cast.`;
-	}
+
 	if ( design.family === "Murder of Crows" ) {
 		return `Every ${rank2 ? 8 : 10}th damaging attack deals ${
 			formatValue( value )
@@ -494,30 +530,6 @@ function petSkillEffectLines( d: PetSkillDesign, value: number, rank: number ): 
 				"Requires a damaging hit; uniques immune"
 			];
 
-		case "Frost Armor":
-			return [ `Physical defence +${v}%`, `Magical defence +${v}%` ];
-		case "Frost Nova":
-			return [
-				`Magical damage ${v}%`,
-				`Range ${advanced ? 7 : 5} m`,
-				"Maximum targets 8",
-				"Inflicts frostbite; native resistance applies"
-			];
-		case "Deep Freeze":
-			return [
-				`Freeze potency ${v}`,
-				...(advanced ? [ "Spreads to 2 additional targets" ] : []),
-				"Duration follows target resistance"
-			];
-		case "Cold Mastery":
-			return [ `Magical attack +${v}%` ];
-		case "Static Feathers":
-			return [
-				`Chain strike chance ${v}% per attack`,
-				`Maximum targets ${advanced ? 5 : 3}`,
-				"Range 8 m; damage reduction 20%",
-				"Inflicts electric shock"
-			];
 		case "Mend":
 			return [ `Owner HP restored ${formatValue( value * (advanced ? 1.5 : 1) )}%` ];
 		case "Mark Prey":

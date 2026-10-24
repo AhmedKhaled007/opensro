@@ -15,7 +15,8 @@ import {
 	experimentalOptions,
 	type ExperimentalKey,
 	type ExperimentalOptions,
-	renderScales
+	renderScales,
+	uiScaleStop
 } from "@/engine/foundation/ui/experimental-options";
 import type { SessionState } from "@/engine/contracts/session";
 
@@ -28,7 +29,7 @@ and one-line help. Numeric preferences never pass through toggle().
 ================
 */
 export interface ExperimentalRow {
-	readonly key: ExperimentalKey | "renderScale";
+	readonly key: ExperimentalKey | "renderScale" | "uiScale";
 	readonly id: string;
 	readonly label: string;
 	readonly description: string;
@@ -58,6 +59,12 @@ export const EXPERIMENTAL_TABS: readonly {
 				id: "experimental-render-scale",
 				label: "Render scale",
 				description: "100% is native; lower values soften the scene."
+			},
+			{
+				key: "uiScale",
+				id: "experimental-ui-scale",
+				label: "UI size",
+				description: "Scale windows and text; 100% is native size."
 			},
 			{
 				key: "postProcessing",
@@ -185,6 +192,11 @@ export const EXPERIMENTAL_TABS: readonly {
 			id: "experimental-smart-pet-pickup",
 			label: "Keep pet gold pickup when full",
 			description: "Keep picking up gold when a full bag refuses an item."
+		}, {
+			key: "touchInspect",
+			id: "experimental-touch-inspect",
+			label: "Tap shows item details",
+			description: "On touch, a tap on an item or skill keeps its tooltip up."
 		} ]
 	},
 	{
@@ -329,6 +341,19 @@ export function createExperimentalHud() {
 			const renderScale = renderScales().find( scale => scale === value );
 			if ( renderScale === undefined ) return;
 			draft = { ...draft, renderScale };
+		},
+		/*
+		================
+		setUiScale
+
+		Port-only, not native. The slider's stop becomes the draft's UI size;
+		a value off the slider leaves the draft intact.
+		================
+		*/
+		setUiScale( value: number ) {
+			const uiScale = uiScaleStop( value );
+			if ( uiScale === undefined ) return;
+			draft = { ...draft, uiScale };
 		},
 		/*
 		================

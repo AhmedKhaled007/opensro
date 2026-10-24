@@ -109,6 +109,16 @@ func (rt *Runtime) manualPetSkill(division string, owner, snapshot *enterworld.C
 		if target == 0 {
 			return petTrainingReceipt("Select an enemy for this pet ability.")
 		}
+		if companion.PetKind(pet.Codename) == "Penguin" {
+			step, ok := rt.penguinCompanion(division, owner, now)
+			if !ok {
+				return petTrainingReceipt("Penguin spells require a living nearby penguin outside town.")
+			}
+			victim, ok := rt.resolvePetCombatTarget(step, target)
+			if !ok || victim.monster == nil {
+				return petTrainingReceipt("Select a monster for this spell.")
+			}
+		}
 		if skill.EffectName() == "Savage Rend" {
 			step, ok := rt.wolfCompanion(division, owner, gid, now)
 			if !ok {

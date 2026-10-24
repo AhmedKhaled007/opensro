@@ -74,7 +74,7 @@ still needed.
 | --- | --- | --- | --- |
 | Bear | High HP/defense; lower attack | Challenging Roar; Iron Hide | Unbroken Spirit; Guardian’s Bond; Crushing Paw |
 | Wolf | Physical offense | Hunting Howl; Savage Rend | Execute; Bloodscent; Blood Hunt |
-| Penguin | Magic/control; lower HP | Frost Nova; Deep Freeze | Cold Mastery; Static Feathers; Frost Armor |
+| Penguin | Ranged magic/control; lower HP | Ice Lance; Blizzard | Shatter; Arcane Resonance; Frozen Hourglass |
 | Three Footed Crow | Owner support | Mend; Mark Prey | Carrion Feast; Swift Wings; Murder of Crows |
 
 Bear **Guardian’s Bond** replaces Last Stand; learned book IDs and ranks are

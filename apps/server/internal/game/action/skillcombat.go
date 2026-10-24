@@ -12,6 +12,7 @@ action admission precedes mutation; the token outlives the projectile flight.
 package action
 
 import (
+	"opensro.online/server/internal/game/world/monster"
 	"strings"
 	"sync/atomic"
 
@@ -384,6 +385,7 @@ func (rt *Runtime) acceptSkillStagePhaseAt(divisionID string, character, snapsho
 	if len(formulas) == 0 {
 		return OpResult{}, skillCastRefused
 	}
+	rt.penguinOwnerShatter(divisionID, snapshot, target, formulas, nowMs)
 	damagePlans, planned := rt.planMonsterImpacts(divisionID, snapshot, skill, target, formulas, nowMs)
 	if !planned {
 		return OpResult{}, skillCastRefused
@@ -604,6 +606,7 @@ func (rt *Runtime) acceptSkillStagePhaseAt(divisionID string, character, snapsho
 	if rootID == 0 {
 		for _, impact := range committed {
 			if impact.Damage > 0 {
+				rt.penguinOwnerHit(divisionID, character, skill, []monster.Instance{target}, formulas, nowMs)
 				rt.wolfExecuteAttack(divisionID, character, 0, 1, []uint32{target.Gid}, nowMs)
 				break
 			}

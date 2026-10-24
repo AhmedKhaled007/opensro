@@ -195,7 +195,12 @@ import { createCosHud } from "./hud/cos-hud";
 import { createCompactHud, compactHudLayout, compactWindowDrag, compactCloseControl } from "./hud/compact-hud";
 import { fitUiGroup } from "@/engine/foundation/ui/layout";
 import { createExperimentalHud, experimentalTabs, EXPERIMENTAL_TABS } from "./hud/experimental-hud";
-import { renderScales, type ExperimentalOptions } from "@/engine/foundation/ui/experimental-options";
+import {
+	renderScales,
+	UI_SCALE_MAX,
+	UI_SCALE_MIN,
+	type ExperimentalOptions
+} from "@/engine/foundation/ui/experimental-options";
 import {
 	PET_GEAR_SLOTS,
 	PET_TRAINING_OP,
@@ -676,7 +681,9 @@ import {
 	DEBUG_COMMAND_MESSAGE_CLEAR,
 	DEBUG_COMMAND_NULL,
 	DEBUG_COMMAND_PLAYER_COUNT,
+	DEBUG_COMMAND_SET_FIELD_OF_VIEW,
 	debugCommand,
+	debugFieldOfView,
 	type DebugCommand
 } from "@/engine/foundation/ui/debug-commands";
 import { messageBox } from "@/engine/foundation/ui/message-box";
@@ -870,6 +877,7 @@ rather than as another createUi parameter.
 */
 export interface UiExtensions {
 	bugReport?: BugReportControl | null;
+	setWorldFieldOfView?: ( degrees: number ) => void;
 	saveExperimental?: ( value: ExperimentalOptions ) => void;
 	saveWindowPositions?: ( value: WindowPositions ) => void;
 }
@@ -2472,9 +2480,8 @@ export function createUi(
 	================
 	runDebugCommand
 
-	CGInterface_OnCommandMessage (690C40) for the console family. The other
-	command.txt families (camera, weather, time, render toggles) are not
-	ported yet and leave the line as typed.
+	CGInterface_OnCommandMessage for the console family, bag-slot use and FOV.
+	The remaining command.txt families leave the line as typed.
 	================
 	*/
 	function runDebugCommand( command: DebugCommand ) {
@@ -2500,6 +2507,11 @@ export function createUi(
 				// CIFInventory_ExecuteItemAction(slot, -1, -1) as a double click.
 				if ( command.args.length === 1 ) useInventorySlot( commandInteger( command.args[0]! ) );
 				break;
+			case DEBUG_COMMAND_SET_FIELD_OF_VIEW: {
+				const degrees = debugFieldOfView( command.args );
+				if ( degrees !== null ) extensions.setWorldFieldOfView?.( degrees );
+				break;
+			}
 		}
 	}
 	/*
@@ -2785,7 +2797,7 @@ export function createUi(
 			if ( id.startsWith( "experimental-tab:" ) ) experimental.selectTab( Number( id.slice( 17 ) ) );
 			else if ( id.startsWith( "experimental-render-scale:" ) ) {
 				experimental.selectRenderScale( Number( id.slice( "experimental-render-scale:".length ) ) );
-			} else if ( row && row.key !== "renderScale" ) experimental.toggle( row.key );
+			} else if ( row && row.key !== "renderScale" && row.key !== "uiScale" ) experimental.toggle( row.key );
 			else if ( id === "experimental-default" ) experimental.reset();
 			else if ( id === "experimental-confirm" ) {
 				extensions.saveExperimental?.( experimental.confirm() );
@@ -3584,8 +3596,12 @@ export function createUi(
 		} else if ( id.startsWith( "alchemy-slot:" ) ) {
 			const item = view.gameplay?.inventory.find( r => r.slot === Number( id.slice( 13 ) ) );
 			if ( item && !view.gameplay?.inventoryPending ) {
-				const next = alchemySelection( alchemyMode, alchemySlots, item );
-				if ( next ) {
+				const target = alchemySlots.length ?
+					view.gameplay?.inventory.find( r => r.slot === alchemySlots[0] ) :
+					undefined;
+				const next = alchemySelection( alchemyMode, alchemySlots, item, target );
+				if ( next?.refusal ) hudMessages.append( hudCopy( next.refusal ) );
+				else if ( next ) {
 					alchemyMode = next.mode;
 					alchemySlots = next.slots;
 					alchemyQuantity = "1";
@@ -7673,6 +7689,10 @@ export function createUi(
 					else if ( key === "min" || key === "max" ) {
 						partyForm[key] = event.value.replace( /[^0-9]/g, "" ).slice( 0, 3 );
 					}
+				} else if ( event.id === "experimental-ui-scale" && panel === "Experimental" ) {
+					// Port-only, not native: the range control reports the slider's
+					// stop; the draft helper snaps or rejects it.
+					experimental.setUiScale( Number( event.value ) );
 				} else if ( event.id.startsWith( "option-audio:" ) && panel === "Option" ) {
 					const key = event.id.slice( 13 ), n = Number( event.value );
 					if (
@@ -9568,7 +9588,17 @@ export function createUi(
 					if ( node.texture ) authoredImage( node, ox, oy );
 					if ( node.type === "CIFStatic" && node.text ) authoredText( node, ox, oy, hudCopy( node.text ) );
 				} else if ( node.type === "CIFPML" ) {
-					const out = text.guide( guideTokens( hudCopy( node.text ) ), r, r, node.color, resources.size );
+					const out = text.guide(
+						guideTokens( hudCopy( node.text ) ),
+						r,
+						r,
+						node.color,
+						resources.size,
+						{
+							align: node.hAlign === 1 ? "center" : node.hAlign === 2 ? "right" : "left",
+							vAlign: node.vAlign
+						}
+					);
 					quads.push( ...out.quads );
 					paths.push( ...out.paths );
 				}
@@ -9993,7 +10023,8 @@ export function createUi(
 					rightActivate: !!item && (id.startsWith( "slot:" ) || id.startsWith( "storage-slot:" )),
 					draggable: !!item && !repairHud.armed() && cosHud.itemTargetCursor() === null,
 					carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item &&
-						ITEM_SLOT_PREFIXES.some( prefix => id.startsWith( prefix ) )
+						ITEM_SLOT_PREFIXES.some( prefix => id.startsWith( prefix ) ),
+					inspect: !!item && experimental.state().saved.touchInspect
 				} );
 				itemCount( item, r );
 			}
@@ -12336,7 +12367,12 @@ export function createUi(
 						authoredText(
 							{
 								...slot.GDR_GAME_OPTION_SLOT_STA1!,
-								rect: [ 39, top + 4, row.key === "renderScale" ? 130 : 270, 16 ],
+								rect: [
+									39,
+									top + 4,
+									row.key === "renderScale" || row.key === "uiScale" ? 130 : 270,
+									16
+								],
 								client: [ 0, 2, 0, 0 ]
 							},
 							px,
@@ -12356,6 +12392,45 @@ export function createUi(
 									draft.renderScale === scale
 								);
 							}
+						} else if ( row.key === "uiScale" ) {
+							// Port-only, not native: the option slider's thumb over a
+							// drawn groove, as the Audio tab draws its thumb; the
+							// range control under it owns the drag and the keys.
+							const sliderLeft = 168, sliderWidth = 140;
+							rect( [ px + sliderLeft, py + top + 7, sliderWidth, 2 ], [ 0.45, 0.45, 0.45, 1 ] );
+							image(
+								[
+									px + sliderLeft + Math.trunc(
+										(draft.uiScale - UI_SCALE_MIN) * (sliderWidth - 16) /
+											(UI_SCALE_MAX - UI_SCALE_MIN)
+									),
+									py + top,
+									16,
+									16
+								],
+								ROOT + "interface/ifcommon/com_scroll_button.png"
+							);
+							authoredText(
+								{
+									...slot.GDR_GAME_OPTION_SLOT_STA1!,
+									rect: [ 316, top + 4, 45, 16 ],
+									client: [ 0, 2, 0, 0 ]
+								},
+								px,
+								py,
+								draft.uiScale + "%"
+							);
+							controls.push( {
+								id: row.id,
+								label: row.label,
+								kind: "range",
+								rect: [ px + sliderLeft, py + top, sliderWidth, 16 ],
+								min: UI_SCALE_MIN,
+								max: UI_SCALE_MAX,
+								value: String( draft.uiScale ),
+								valueText: draft.uiScale + "%",
+								helpText: draft.uiScale + "%"
+							} );
 						} else {
 							const enabled = draft[row.key];
 							image(
@@ -12373,7 +12448,12 @@ export function createUi(
 						authoredText(
 							{
 								...slot.GDR_GAME_OPTION_SLOT_STA1!,
-								rect: [ 39, top + (row.key === "renderScale" ? 26 : 22), 304, 16 ],
+								rect: [
+									39,
+									top + (row.key === "renderScale" || row.key === "uiScale" ? 26 : 22),
+									304,
+									16
+								],
 								client: [ 0, 0, 0, 0 ],
 								color: [ 180 / 255, 180 / 255, 180 / 255, 1 ]
 							},
@@ -13481,7 +13561,8 @@ export function createUi(
 							selected: inventorySlot === slot,
 							rightActivate: !!item || repairHud.armed(),
 							draggable: !!item && !repairHud.armed() && cosHud.itemTargetCursor() === null,
-							carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item
+							carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item,
+							inspect: !!item && experimental.state().saved.touchInspect
 						} );
 						if ( enabled && item ) {
 							for (
@@ -13591,7 +13672,8 @@ export function createUi(
 								disabled: attachmentBlocked,
 								rightActivate: !!item || repairHud.armed(),
 								draggable: !!item && !repairHud.armed() && cosHud.itemTargetCursor() === null,
-								carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item
+								carry: !repairHud.armed() && cosHud.itemTargetCursor() === null && !!item,
+								inspect: !!item && experimental.state().saved.touchInspect
 							} );
 						}
 					}
@@ -13946,7 +14028,8 @@ export function createUi(
 								rightActivate: !restoring && !!owned &&
 									(hudData.tooltipSkills.get( entry.id )?.basicActivity ?? 0) !== 0,
 								draggable: !!owned && (hudData.tooltipSkills.get( entry.id )?.basicActivity ?? 0) !== 0,
-								selected: entry.id === selectedSkill
+								selected: entry.id === selectedSkill,
+								inspect: experimental.state().saved.touchInspect
 							} );
 							if ( owned ) {
 								const tab = ROOT + "interface/skill/skl_level_tab.png";
@@ -16607,7 +16690,8 @@ export function createUi(
 									kind: "button",
 									disabled: busy,
 									rightActivate: !!item,
-									draggable: !!item && !busy
+									draggable: !!item && !busy,
+									inspect: !!item && experimental.state().saved.touchInspect
 								} );
 							} );
 							[
@@ -20521,7 +20605,10 @@ export function createUi(
 								"%s",
 								next.session?.character ?? ""
 							).replace( "%s", partyJoining.name ),
-							out = text.guide( guideTokens( copy ), r, r, white, resources.size );
+							out = text.guide( guideTokens( copy ), r, r, white, resources.size, {
+								align: node.hAlign === 1 ? "center" : node.hAlign === 2 ? "right" : "left",
+								vAlign: node.vAlign
+							} );
 						quads.push( ...out.quads );
 						paths.push( ...out.paths );
 					} else if ( node.type === "CIFGauge" ) {
