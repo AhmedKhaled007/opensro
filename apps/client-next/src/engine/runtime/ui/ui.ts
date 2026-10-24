@@ -15573,7 +15573,8 @@ export function createUi(
 
 				if (
 					game?.npcConversation && game.npcConversation.phase !== "closed" && hudData &&
-					guideResources.data() && !(panel === "Shop" && game.shop?.npc === game.npcConversation.gid)
+					guideResources.data() && panel !== "Storage" &&
+					!(panel === "Shop" && game.shop?.npc === game.npcConversation.gid)
 				) {
 					const mark = beginWindow(),
 						root = hudData.root.GDR_NPCWINDOW!,
