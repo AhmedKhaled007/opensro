@@ -177,6 +177,10 @@ var Settings = []Setting{
 	// default stays native ("off", ceiling 250).
 	{Env: "SRO_ALCHEMY_MAX_PLUS", NomadVar: "alchemy_max_plus", Default: "off", Catalogue: true},
 	{Env: "SRO_TEAM_DEATH_REVIVE", NomadVar: "team_death_revive", Default: "on"},
+	// Owner, 2026-10-24: the daily Capture the Flag match (#887) - its UTC
+	// start (HH:MM) and the house minimum; the GameWorld refuses bad values.
+	{Env: "SRO_FLAGWAR_START_UTC", NomadVar: "flagwar_start_utc", Default: "20:00"},
+	{Env: "SRO_FLAGWAR_MIN_PLAYERS", NomadVar: "flagwar_min_players", Default: "4"},
 	{Env: "SRO_BETA_GROWTH", NomadVar: "beta_growth", Default: "on", Catalogue: true, Validation: ValueSwitch},
 	// Owner, 2026-10-24: 1-59 at the level-1 pace, 60-89 at 20x, 90-110 at
 	// 10x; unset keeps every level at the pace.

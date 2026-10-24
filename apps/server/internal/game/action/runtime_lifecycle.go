@@ -170,6 +170,7 @@ func (rt *Runtime) TickHook() simulation.TickHook {
 		frames("ReleaseExpiredOwnership", rt.ReleaseExpiredOwnership)
 		frames("SweepExpired", rt.SweepExpired)
 		step("retireActionSessions", func() { out = append(out, rt.retireActionSessions()...) })
+		frames("advanceFlagWar", rt.advanceFlagWar)
 		// Last, so a notice any step above queued leaves this same tick.
 		frames("drainAnnouncements", rt.drainAnnouncements)
 		return out
