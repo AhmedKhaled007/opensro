@@ -236,6 +236,9 @@ type Runtime struct {
 	FortressStore     enterworld.FortressStore
 	fortressPersistMu sync.Mutex
 	fortressPersist   fortressPersistence
+	// fortressRoster times the structure rosters (fortress_roster.go).
+	fortressRosterMu sync.Mutex
+	fortressRoster   fortressRosterClock
 
 	// GachaCatalog is the strict v1.150 gachaitemset/gachanpcmap authority.
 	// The composition root installs it before Register admits 0x7338/0x7053.
@@ -261,6 +264,7 @@ type Runtime struct {
 	petSessions map[petOwnerKey]*petSession
 	petShields  petShieldStore
 	wolfHowls   wolfHowlStore
+	tailwinds   tailwindStore
 
 	// Admission precedes game-ready/pet binding; teardown follows this owner.
 	characterAdmissions sync.Map // simulation.WorldKey -> populationAdmission

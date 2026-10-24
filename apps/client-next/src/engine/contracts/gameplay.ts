@@ -246,6 +246,16 @@ export type GameplayCommand =
 	| { readonly kind: "fortress-war-status"; readonly gid: number; }
 	| { readonly kind: "fortress-staff"; readonly gid: number; readonly fortress: number; readonly flag?: number; }
 	| { readonly kind: "fortress-schedule"; readonly gid: number; readonly fortress: number; }
+	// The battle aide's fortress map (fortress-map.ts): the structure list
+	// 0x18 that opens it, an upgrade or construction 0x0B and a repair 0x0C.
+	| {
+		readonly kind: "fortress-structure";
+		readonly gid: number;
+		readonly fortress: number;
+		readonly action: number;
+		readonly zone?: number;
+		readonly type?: number;
+	}
 	// 0x71E1 actions 0 (query), 1 (rate) and 2 (collect) from the tax window.
 	| { readonly kind: "fortress-tax"; readonly gid: number; readonly fortress: number; }
 	// The structure target window's delete (517CA0): dismiss 0x16 or demolish 0x17.
@@ -615,6 +625,18 @@ an empty slot), from the latest server state.
 ================
 */
 export interface PetTraining {
+	readonly guidance?: {
+		readonly gid: number;
+		readonly book: number;
+		readonly stacks: number;
+		readonly hitPercent: number;
+	};
+	readonly tailwind?: {
+		readonly gid: number;
+		readonly book: number;
+		readonly stacks: number;
+		readonly speedPercent: number;
+	};
 	readonly counters?: {
 		readonly attacks: number;
 		readonly wolfExecute?: number;
@@ -695,6 +717,8 @@ export interface GameplayState {
 	readonly betaPlayers?: readonly BetaMapPlayer[];
 	// Port-only wolf skill tree of the pet window's wolf (pet-training.ts).
 	readonly petTraining?: PetTraining;
+	readonly petTailwind?: PetTraining["tailwind"];
+	readonly petGuidance?: PetTraining["guidance"];
 	/** RefObjIDs the server never spends (the beta starter kit), drawn as unlimited. */
 	readonly unlimitedItems?: readonly number[];
 	readonly returnScroll?: import("@/engine/foundation/gameplay/return-scroll").ReturnScrollCast;
