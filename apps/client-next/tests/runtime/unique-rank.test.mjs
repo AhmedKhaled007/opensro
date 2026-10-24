@@ -1,7 +1,7 @@
 /*
 ===========================================================================
 
-unique-rank.test.mjs - the unique kill damage ranking (port-only 0x3FB7)
+unique-rank.test.mjs - the unique kill damage ranking (port-only 0x3FBC)
 
 The worker decodes the frame whole or not at all, the window's rows show
 place, damage, share and party place, the window opens once per kill, and
@@ -21,6 +21,9 @@ const { uniqueRankLines, groupedDamage, damageShare, partyPlace } = await import
 	"../../src/engine/foundation/gameplay/unique-rank.ts"
 );
 const { createUniqueRankHud } = await import( "../../src/engine/runtime/ui/hud/unique-rank-hud.ts" );
+const { createGameplay } = await import(
+	"../../src/engine/runtime/simulation/worker/session/world/gameplay/gameplay.ts"
+);
 const { experimentalOptions } = await import( "../../src/engine/foundation/ui/experimental-options.ts" );
 
 /*
@@ -108,6 +111,24 @@ test("the worker decodes a ranking whole and numbers each one", () => {
 	owner.receive( rankFrame( ROWS, { rank: 1, damage: 600, partyRank: 1 } ), new Map() );
 	assert.equal( owner.current()?.sequence, 2 );
 	assert.equal( owner.current()?.uniqueName, "" );
+});
+
+test("the ranking has its own opcode, and the crow's Tailwind still reaches pet training", () => {
+	// pettailwind.go's private 0x3FB7: recipient u32, book u8, stacks u8, speed x10 u16.
+	assert.notEqual( OP_UNIQUE_DAMAGE_RANK, 0x3fb7 );
+	const game = createGameplay( () => {} );
+	game.bootstrap( {} );
+	const tailwind = new Uint8Array( 8 ), v = new DataView( tailwind.buffer );
+	v.setUint32( 0, 100002, true );
+	tailwind[4] = 57;
+	tailwind[5] = 10;
+	v.setUint16( 6, 300, true );
+	game.receive( { opcode: 0x3fb7, payload: tailwind }, 0 );
+	game.receive( rankFrame( ROWS, { rank: 2, damage: 300, partyRank: 0 } ), 0 );
+	const state = game.take();
+	assert.deepEqual( state?.petTailwind, { gid: 100002, book: 57, stacks: 10, speedPercent: 30 } );
+	assert.equal( state?.uniqueDamageRank?.selfRank, 2 );
+	game.dispose();
 });
 
 test("the rows show grouped damage, one-decimal shares and party places", () => {

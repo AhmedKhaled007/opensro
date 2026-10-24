@@ -3,7 +3,7 @@
 
 uniquedamagerank_test.go - the damage ranking shown when a unique dies
 
-Port-only, not native: off, no unique kill sends 0x3FB7; on, every ranked
+Port-only, not native: off, no unique kill sends 0x3FBC; on, every ranked
 contributor receives the top rows and its own place, and nothing else does.
 
 ===========================================================================

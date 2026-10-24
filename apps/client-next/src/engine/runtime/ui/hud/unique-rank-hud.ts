@@ -3,7 +3,7 @@
 
 unique-rank-hud.ts - the unique damage ranking window (port-only, not native)
 
-Opens once for every ranking the worker publishes (0x3FB7, sent only with
+Opens once for every ranking the worker publishes (0x3FBC, sent only with
 SRO_UNIQUE_DAMAGE_RANK on) and stays open until the player closes it. A
 newer kill replaces the open ranking. The original has no such window.
 It shows only with the Experimental "Unique damage ranking" row on.

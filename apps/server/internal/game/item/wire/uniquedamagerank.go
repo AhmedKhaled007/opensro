@@ -4,7 +4,7 @@
 uniquedamagerank.go - the unique kill damage ranking (port-only, not native)
 
 When a unique dies, the operator can show everyone who damaged it the
-players who did the most damage. 0x3FB7 is a port-only opcode: no v1.150
+players who did the most damage. 0x3FBC is a port-only opcode: no v1.150
 client or v1.188 server uses it, and only this port's browser client
 consumes it. A row's rank is its place in the frame; a party rank of 0
 means the player was in no party.
@@ -27,7 +27,7 @@ package wire
 import "encoding/binary"
 
 // OpUniqueDamageRank is the port-only S->C unique kill damage ranking.
-const OpUniqueDamageRank uint16 = 0x3FB7
+const OpUniqueDamageRank uint16 = 0x3FBC
 
 // UniqueDamageRankMaxRows bounds the ranked rows one frame carries.
 const UniqueDamageRankMaxRows = 12

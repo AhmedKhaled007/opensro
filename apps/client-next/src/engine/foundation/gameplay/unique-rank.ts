@@ -3,7 +3,7 @@
 
 unique-rank.ts - the unique damage ranking window's rows (port-only, not native)
 
-Turns the 0x3FB7 ranking (worker unique-rank.ts) into the rows the window
+Turns the 0x3FBC ranking (worker unique-rank.ts) into the rows the window
 prints: place, name, damage, share of the unique's damage and party place.
 The original has no such window; the server sends it only with
 SRO_UNIQUE_DAMAGE_RANK on.

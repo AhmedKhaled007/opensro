@@ -1,7 +1,7 @@
 /*
 ===========================================================================
 
-unique-rank.ts - a unique kill's damage ranking (port-only 0x3FB7, not native)
+unique-rank.ts - a unique kill's damage ranking (port-only 0x3FBC, not native)
 
 When the operator enables it (SRO_UNIQUE_DAMAGE_RANK), everyone who
 damaged a dying unique receives the twelve players who did the most damage
@@ -17,7 +17,7 @@ u16 selfRank, u32 selfDamage, u8 selfPartyRank.
 import type { WireFrame } from "@/engine/contracts/network";
 import type { UniqueDamageRank, UniqueDamageRow } from "@/engine/contracts/gameplay";
 
-export const OP_UNIQUE_DAMAGE_RANK = 0x3fb7;
+export const OP_UNIQUE_DAMAGE_RANK = 0x3fbc;
 const MAX_ROWS = 12;
 const HEADER_BYTES = 13;
 const SELF_BYTES = 7;

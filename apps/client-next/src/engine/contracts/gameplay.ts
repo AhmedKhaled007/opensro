@@ -716,7 +716,7 @@ export interface BetaMapPlayer {
 ================
 UniqueDamageRow
 
-One ranked player of a unique kill (port-only 0x3FB7; unique-rank.ts). A
+One ranked player of a unique kill (port-only 0x3FBC; unique-rank.ts). A
 party rank of 0 means the player was in no party.
 ================
 */
