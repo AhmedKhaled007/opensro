@@ -219,6 +219,11 @@ test("a stalled consumer's backlog compacts into a resync instead of killing the
 		[ "reset", "bootstrap", "spawn", "synchronized" ]
 	);
 	assert.equal( resync.events[2].entity.gid, spawn.gid );
+	// #1481: the rebuilt batch is marked as a journal resync, so the
+	// presentation updates held characters in place instead of fading
+	// them in again; an entry publication stays unmarked.
+	assert.equal( resync.events[0].resync, true );
+	assert.equal( resync.events[2].resync, true );
 	assert.equal( owner.synchronized(), false );
 	assert.equal( p.apply( resync ), true );
 	assert.ok( p.read( spawn.gid ), "the rebuilt world holds the entity" );
@@ -230,6 +235,94 @@ test("a stalled consumer's backlog compacts into a resync instead of killing the
 	assert.equal( flush( owner ).events.at( -1 ).entity.appearanceState[2], 0 );
 	owner.dispose();
 	p.dispose();
+});
+
+test("one-shot natives queued before a compaction ride the resync in order", () => {
+	const owner = createEntities();
+	const p = createPresentation();
+	owner.bootstrap( bootstrap );
+	p.apply( flush( owner ) );
+	for ( const row of rows ) owner.receive( row );
+	const entered = flush( owner );
+	p.apply( entered );
+	const spawn = entered.events.find( e => e.kind === "spawn" ).entity;
+	const notice = marker => ({ kind: "native", opcode: 0x300c, payload: Uint8Array.of( marker ) });
+	// The consumer stalls on an unacknowledged batch (which carries one
+	// native of its own) while two more one-shots queue behind it; a
+	// state flood then compacts the queue (#1482). The rebuilt snapshot
+	// supersedes the flood, never the one-shots.
+	owner.publish( notice( 0 ) );
+	const inflight = owner.take();
+	owner.publish( notice( 1 ) );
+	owner.publish( notice( 2 ) );
+	const packet = value => {
+		const payload = Buffer.alloc( 6 );
+		payload.writeUInt32LE( spawn.gid );
+		payload[4] = 4;
+		payload[5] = value;
+		return { opcode: 0x3122, payload };
+	};
+	for ( let i = 0; owner.resyncs() === 0 && i < 2000000; i++ ) owner.receive( packet( i % 2 ? 4 : 0 ) );
+	assert.equal( owner.resyncs(), 1, "the flood compacts instead of throwing" );
+	// A native queued behind the drop is newer than the kept ones.
+	owner.publish( notice( 3 ) );
+	p.apply( inflight );
+	owner.ack( inflight.sequence );
+	const resync = owner.take();
+	assert.deepEqual(
+		resync.events.map( e => e.kind ),
+		[ "reset", "bootstrap", "spawn", "synchronized", "native", "native", "native" ]
+	);
+	assert.equal( p.apply( resync ), true );
+	assert.deepEqual(
+		p.takeNative().map( e => e.payload[0] ),
+		[ 1, 2, 3 ],
+		"the kept one-shots arrive oldest first, ahead of the post-drop native"
+	);
+	owner.ack( resync.sequence );
+	owner.dispose();
+	p.dispose();
+});
+
+test("compaction keeps only the newest one-shot natives past the retention bound", () => {
+	const owner = createEntities();
+	const indexed = index => {
+		const payload = new Uint8Array( 4 );
+		new DataView( payload.buffer ).setUint32( 0, index, true );
+		return { kind: "native", opcode: 0x300c, payload };
+	};
+	for ( let i = 0; i < 1100; i++ ) owner.publish( indexed( i ) );
+	assert.equal( owner.resyncs(), 0 );
+	// One oversized snapshot publish trips the byte budget and compacts.
+	owner.publish( { kind: "gameplay", state: { localGid: 1, error: "z".repeat( 20 << 20 ) } } );
+	assert.equal( owner.resyncs(), 1 );
+	const resync = owner.take();
+	const natives = resync.events.filter( e => e.kind === "native" );
+	assert.equal( natives.length, 1024, "the retention bound caps the kept one-shots" );
+	const indexOf = event =>
+		new DataView( event.payload.buffer, event.payload.byteOffset, event.payload.byteLength ).getUint32( 0, true );
+	assert.equal( indexOf( natives[0] ), 1100 - 1024, "the oldest one-shots are shed first" );
+	assert.equal( indexOf( natives.at( -1 ) ), 1099, "the newest one-shot is kept" );
+	owner.ack( resync.sequence );
+	owner.dispose();
+});
+
+test("an oversized one-shot is shed without shielding the smaller ones around it", () => {
+	const owner = createEntities();
+	const small = marker => ({ kind: "native", opcode: 0x300c, payload: Uint8Array.of( marker ) });
+	owner.publish( small( 1 ) );
+	owner.publish( { kind: "native", opcode: 0x300c, payload: new Uint8Array( (1 << 20) + 1 ) } );
+	owner.publish( small( 2 ) );
+	owner.publish( { kind: "gameplay", state: { localGid: 1, error: "z".repeat( 20 << 20 ) } } );
+	assert.equal( owner.resyncs(), 1 );
+	const resync = owner.take();
+	assert.deepEqual(
+		resync.events.filter( e => e.kind === "native" ).map( e => e.payload[0] ),
+		[ 1, 2 ],
+		"the native past the byte bound is shed; its neighbours are kept in order"
+	);
+	owner.ack( resync.sequence );
+	owner.dispose();
 });
 
 test("reliable journal compacts past 8192 events and teardown never publishes a reset", () => {
@@ -774,6 +867,84 @@ test("a dropped session keeps retrying through the resume grace, then gives up",
 	assert.equal( world.status().phase, "disconnected" );
 	assert.ok( clock >= 30000 && clock < 40000, `gave up at ${clock} ms, after the 30 s resume grace` );
 	world.dispose();
+});
+
+test("a fresh entry retries a stalled admission and enters", async t => {
+	const sockets = socketHarness( t ), mints = [];
+	const world = createWorldSession(
+		async kind => {
+			mints.push( kind );
+			return "ticket";
+		},
+		undefined,
+		ignoreIncident
+	);
+	t.after( () => world.dispose() );
+	world.enter( "fixture", "shard", "http://localhost:9000" );
+	await settle();
+	world.step( 1 );
+	const first = sockets[0];
+	first.onopen();
+	first.receive( 2, welcome() );
+	world.step( 2 );
+	await settle();
+	world.step( 3 );
+	assert.deepEqual( mints, [ "transport", "enterworld" ] );
+	// The EnterWorld answer never comes: a full admission window of
+	// silence fails the attempt, but the entry itself retries instead
+	// of rejecting back to character select (#1416).
+	world.step( 10004 );
+	assert.equal( world.status().phase, "reconnecting" );
+	assert.equal( world.status().error, "World connection timed out" );
+	world.step( 10254 );
+	await settle();
+	world.step( 10255 );
+	assert.equal( sockets.length, 2 );
+	const second = sockets[1];
+	second.onopen();
+	second.receive( 2, welcome() );
+	world.step( 10256 );
+	await settle();
+	world.step( 10257 );
+	second.receive( 7, entered() );
+	for ( const row of rows ) second.receive( row.opcode, row.payload );
+	world.step( 10258 );
+	flush( world );
+	world.step( 10259 );
+	assert.deepEqual( mints, [ "transport", "enterworld", "transport", "enterworld" ] );
+	assert.equal( world.status().phase, "world" );
+	assert.equal( world.status().error, undefined );
+});
+
+test("a fresh entry gives up after the entry retry grace", async t => {
+	const sockets = socketHarness( t );
+	const world = createWorldSession( async () => "ticket", undefined, ignoreIncident );
+	t.after( () => world.dispose() );
+	world.enter( "fixture", "shard", "http://localhost:9000" );
+	await settle();
+	world.step( 1 );
+	sockets[0].onclose( { code: 1006, reason: "", wasClean: false } );
+	world.step( 2 );
+	assert.equal( world.status().phase, "reconnecting" );
+	// Every later socket dies before the welcome, as while the network
+	// is down: the entry retries inside its grace, then rejects.
+	let clock = 3, failures = 1;
+	while ( clock < 40000 && world.status().phase !== "disconnected" ) {
+		world.step( clock );
+		await settle();
+		world.step( clock );
+		const latest = sockets[sockets.length - 1];
+		if ( sockets.length - 1 >= failures ) {
+			failures++;
+			latest.onclose( { code: 1006, reason: "", wasClean: false } );
+			world.step( clock );
+		}
+		clock += 50;
+	}
+	assert.ok( failures > 3, `retried ${failures} times, more than one attempt` );
+	assert.equal( world.status().phase, "disconnected" );
+	assert.equal( world.status().error, "Transport connection closed" );
+	assert.ok( clock >= 30000 && clock < 40000, `gave up at ${clock} ms, after the 30 s entry grace` );
 });
 
 // EncodeCosSpawnBand2 and EncodeCosRideState are the server-owned wire authority.
@@ -2037,6 +2208,85 @@ test("admission survives socket progress past ten seconds and times out after si
 
 /*
 ================
+keepalive pings slide the admission window (#1417)
+
+A slow world entry is silent by design (publication gate, bootstrap
+build), so the server proves the wire with transport pings the network
+owner answers invisibly. Those pings are progress for the stall window;
+only true silence fails the attempt.
+================
+*/
+test("admission survives keepalive-only progress and times out after true silence", async t => {
+	const sockets = socketHarness( t );
+	const world = createWorldSession( async () => "ticket", undefined, ignoreIncident );
+	t.after( () => world.dispose() );
+	world.enter( "fixture", "shard", "http://localhost:9000" );
+	await settle();
+	world.step( 1 );
+	const socket = sockets[0];
+	socket.onopen();
+	socket.receive( 2, welcome() );
+	world.step( 2 );
+	await settle();
+	world.step( 3 );
+	socket.receive( 7, entered() );
+	let time = 3;
+	for ( let round = 0; round < 4; round++ ) {
+		socket.receive( 3, Uint8Array.of( 1, 2, 3, 4 ) );
+		time += 9000;
+		world.step( time );
+		assert.equal( world.status().phase, "entering-world" );
+		assert.equal( world.status().error, undefined );
+	}
+	world.step( time + 10001 );
+	assert.equal( world.status().error, "World connection timed out" );
+});
+
+/*
+================
+keepalive-only progress is bounded (#1471 review)
+
+A wire that only proves itself with keepalive pings can still be a
+wedged entry (the server builds nothing while its loading cadence
+pings). Progress slides the window only up to a bounded ceiling from
+the arm, so a wedged attempt still fails into the timeout path.
+================
+*/
+test("keepalive-only progress past the admission ceiling still times out", async t => {
+	const sockets = socketHarness( t );
+	const world = createWorldSession( async () => "ticket", undefined, ignoreIncident );
+	t.after( () => world.dispose() );
+	world.enter( "fixture", "shard", "http://localhost:9000" );
+	await settle();
+	world.step( 1 );
+	const socket = sockets[0];
+	socket.onopen();
+	socket.receive( 2, welcome() );
+	world.step( 2 );
+	await settle();
+	world.step( 3 );
+	socket.receive( 7, entered() );
+	// The deadline arms when the EnterWorld result drains (the first
+	// step below, t=9003) and may slide on progress for eighteen windows
+	// (180 s, to t=189003); pings every nine seconds stay admitted that long.
+	let time = 3;
+	for ( let round = 0; round < 20; round++ ) {
+		socket.receive( 3, Uint8Array.of( 1, 2, 3, 4 ) );
+		time += 9000;
+		world.step( time );
+		assert.equal( world.status().phase, "entering-world" );
+		assert.equal( world.status().error, undefined );
+	}
+	// One more ping lands past the ceiling: progress no longer slides,
+	// and the attempt fails on this step instead of waiting forever.
+	socket.receive( 3, Uint8Array.of( 1, 2, 3, 4 ) );
+	time += 9000;
+	world.step( time );
+	assert.equal( world.status().error, "World connection timed out" );
+});
+
+/*
+================
 reference bytes slide their stall window (#1010)
 
 The cold-cache multi-megabyte reference body of a slow link takes longer
@@ -2456,6 +2706,98 @@ test("a stalled link is named and resumed at 8 s, before the receipt watchdog", 
 
 /*
 ================
+a frozen tab's backlog ages on the event clock
+
+The tab froze and its socket backlog (a pong) is delivered in one go
+before the next step; a move leaves after it and nothing more arrives.
+The stall incident must age that backlog on the network's event clock
+(#1474): the last frame really arrived moments ago, however far the
+step clock has since run - the same age the close detail would report.
+Dating the frame to the step that sampled it (the old second owner)
+would report the whole 8 s wait as the frame's age.
+================
+*/
+test("a frozen tab's backlog ages on the event clock in the stall incident", async t => {
+	const sockets = socketHarness( t ), incidents = [];
+	const world = createWorldSession( async () => "ticket", undefined, incident => incidents.push( incident ) );
+	t.after( () => world.dispose() );
+	const entry = { ...bootstrap, simulationProtocolVersion: 1 };
+	world.enter( "fixture", "shard", "http://localhost:9000" );
+	await settle();
+	world.step( 1 );
+	const first = sockets[0];
+	first.onopen();
+	first.receive( 2, welcome() );
+	world.step( 2 );
+	await settle();
+	world.step( 3 );
+	first.receive( 7, entered( entry ) );
+	for ( const row of rows ) first.receive( row.opcode, row.payload );
+	first.receive( 0x32a6, Uint8Array.of( 123, 0, 0, 0, 0, 0, 0, 0 ) );
+	world.step( 4 );
+	flush( world );
+	world.step( 5 );
+	world.ready();
+	// The backlog lands before one step; the move leaves after it.
+	first.receive( 4, Uint8Array.of( 0, 0, 0, 0 ) );
+	world.step( 500 );
+	world.command( { kind: "move", destination: { ...bootstrap.localPlayerEntry.startProfile, x: 10 } } );
+	for ( let ms = 1005; ms <= 8005; ms += 500 ) {
+		world.step( ms );
+		assert.equal( world.status().phase, "world", `${ms} ms: not yet confirmed` );
+	}
+	world.step( 8505 );
+	assert.equal( world.status().phase, "reconnecting" );
+	assert.equal( incidents.length, 1 );
+	assert.equal( incidents[0].code, "transport_stalled" );
+	assert.match( incidents[0].message, /a request waited 8005 ms with no frame arriving/ );
+	const age = /last inbound (\d+) ms ago/.exec( incidents[0].message );
+	assert.ok( age, "the incident ages the last frame" );
+	assert.ok(
+		Number( age[1] ) < 5000,
+		`the backlog's age is its event-clock age, not the step clock's: ${age[1]} ms`
+	);
+});
+
+test("a frame landing in the request's own step does not prove the link alive", async t => {
+	const sockets = socketHarness( t ), incidents = [];
+	const world = createWorldSession( async () => "ticket", undefined, incident => incidents.push( incident ) );
+	t.after( () => world.dispose() );
+	const entry = { ...bootstrap, simulationProtocolVersion: 1 };
+	world.enter( "fixture", "shard", "http://localhost:9000" );
+	await settle();
+	world.step( 1 );
+	const first = sockets[0];
+	first.onopen();
+	first.receive( 2, welcome() );
+	world.step( 2 );
+	await settle();
+	world.step( 3 );
+	first.receive( 7, entered( entry ) );
+	for ( const row of rows ) first.receive( row.opcode, row.payload );
+	first.receive( 0x32a6, Uint8Array.of( 123, 0, 0, 0, 0, 0, 0, 0 ) );
+	world.step( 4 );
+	flush( world );
+	world.step( 5 );
+	world.ready();
+	// The frame lands after the step, before the move leaves: it is the
+	// request's own step-mate, not an answer to it, and nothing follows.
+	world.step( 500 );
+	first.receive( 4, Uint8Array.of( 0, 0, 0, 0 ) );
+	world.command( { kind: "move", destination: { ...bootstrap.localPlayerEntry.startProfile, x: 10 } } );
+	for ( let ms = 1005; ms <= 8005; ms += 500 ) {
+		world.step( ms );
+		assert.equal( world.status().phase, "world", `${ms} ms: not yet confirmed` );
+	}
+	world.step( 8505 );
+	assert.equal( world.status().phase, "reconnecting" );
+	assert.equal( incidents.length, 1 );
+	assert.equal( incidents[0].code, "transport_stalled" );
+	assert.match( incidents[0].message, /a request waited 8005 ms with no frame arriving/ );
+});
+
+/*
+================
 an unanswered inventory transaction resumes the session
 
 The transport keeps no frame already written to a dying socket, so an item
@@ -2680,4 +3022,48 @@ test("crow skill cues accept bounded books/kinds and reject malformed positions"
 	}
 	p.writeFloatLE( NaN, 8 );
 	assert.throws( () => owner.receive( { opcode: 0x3fbb, payload: p } ) );
+});
+
+/*
+================
+an input dropped before gameplay still advances the input sequence
+
+#1441a: the worker records a gameplay input's sequence where it first takes
+the command, before the readiness gate. A click refused while the world is
+still loading is an input the main thread must never replay, so the
+published movementInputSeq covers it.
+================
+*/
+test("an input refused before the world is ready still advances the published input sequence", async t => {
+	const sockets = socketHarness( t ), world = createWorldSession( async () => "ticket", undefined, ignoreIncident );
+	t.after( () => world.dispose() );
+	const presentation = createPresentation();
+	const drain = () => {
+		let batch;
+		while ( (batch = world.take()) ) {
+			world.ack( batch.sequence );
+			presentation.apply( batch );
+		}
+	};
+	world.enter( "fixture", "shard", "http://localhost:9000" );
+	await settle();
+	world.step( 1 );
+	const first = sockets[0];
+	first.onopen();
+	first.receive( 2, welcome() );
+	world.step( 2 );
+	await settle();
+	world.step( 3 );
+	first.receive( 7, entered() );
+	for ( const row of rows ) first.receive( row.opcode, row.payload );
+	world.step( 4 );
+	drain();
+	world.step( 5 );
+	// Bound but still loading: the command is refused, but its sequence is taken.
+	const destination = { ...bootstrap.localPlayerEntry.startProfile, x: 10 };
+	assert.throws( () => world.command( { kind: "move", destination }, 5, 3 ), /not ready/ );
+	world.ready();
+	world.step( 6 );
+	drain();
+	assert.equal( defined( presentation.gameplay() ).movementInputSeq, 3 );
 });
