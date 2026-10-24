@@ -806,7 +806,7 @@ const FORTRESS_TAX_TRAVEL = 234;
 // CIFJobRank and CIFJobContributionRank share one panel (job-hud.ts).
 const JOB_RANK_PANEL = "Job ranking";
 // The guild window's command button 102 and the notice the window's ban
-// raises for the master or oneself (5E4C30 → 703DD0: 0x10/0x1F).
+// raises for the master or oneself (5E4C30 â†’ 703DD0: 0x10/0x1F).
 const GUILD_AUTHORITY_BUTTON = 102;
 
 /*
@@ -815,7 +815,7 @@ authorityLabel
 
 CIFGuildMember_RefreshButtons (5E1E80) relabels the authority button: the
 master gives authority (UIIT_CTL_GUILD_UNION_CHAT_GRANT), a member checks
-it (…_CONFIRM); the layout's UIIT_CTL_AUTHORITY_GRANT never shows.
+it (â€¦_CONFIRM); the layout's UIIT_CTL_AUTHORITY_GRANT never shows.
 ================
 */
 function authorityLabel( master: boolean ): string {
@@ -2898,11 +2898,11 @@ export function createUi(
 		}
 		if ( id.startsWith( "pet-skill:" ) && experimental.state().saved.attackPetTraining ) {
 			const skill = view?.gameplay?.petTraining?.skills.find( entry => entry.id === Number( id.slice( 10 ) ) );
-			if ( skill && skill.level > 0 && (skill.action || !skill.slotted) ) {
+			if ( skill?.action && skill.level > 0 ) {
 				sendGameplay( {
 					kind: "cos-training",
 					gid: cosGid,
-					operation: skill.action ? PET_TRAINING_OP.use : PET_TRAINING_OP.slot,
+					operation: PET_TRAINING_OP.use,
 					arg: skill.id,
 					target: view?.gameplay?.target ?? 0
 				} );
@@ -3728,7 +3728,7 @@ export function createUi(
 			// The social window's leave asks nothing, as the party window's does.
 			sendGameplay( { kind: id } );
 		} else if ( id === "guild-kick" ) {
-			// 5E4C30 slot 2 → 703DD0 sends the ban on the click. With no member
+			// 5E4C30 slot 2 â†’ 703DD0 sends the ban on the click. With no member
 			// selected nothing happens; the worker refuses the master or oneself
 			// (guildBanRefused) with its 0x10 notice, before any question.
 			// Port-only, not native: the Experimental "Confirm guild ban" row
@@ -10968,7 +10968,15 @@ export function createUi(
 							game.cosRecords?.some( pet => pet.gid === game.petTraining?.gid && pet.hp > 0 ) ?
 						game.petTraining :
 						undefined;
-					for ( const icon of buffBoard( game, next.simulationTimeMs ?? 0, boardSuppressed, ownerPet ) ) {
+					for (
+						const icon of buffBoard(
+							game,
+							next.simulationTimeMs ?? 0,
+							boardSuppressed,
+							ownerPet,
+							experimental.state().saved.attackPetTraining
+						)
+					) {
 						if ( !icon.path ) continue;
 						const r: UiRect = [ origin[0] + icon.x, origin[1] + icon.y, 20, 20 ];
 						paths.push( icon.path );
@@ -17150,7 +17158,7 @@ export function createUi(
 										),
 										rect: r,
 										kind: "button",
-										disabled: busy || !skill.live || skill.level === 0 ||
+										disabled: busy || !action || !skill.live || skill.level === 0 ||
 											(action && !skill.queued && !!petRowCooldown( state!, i, quickslotTime )),
 										selected: skill.queued || skill.slotted,
 										draggable: skill.action && skill.live && skill.level > 0
@@ -23914,7 +23922,7 @@ export function createUi(
 							mallText( price, [ dx, dy + 36, dw, 40 ] );
 							mallButton(
 								"item-mall-quantity-down",
-								"−",
+								"âˆ’",
 								[ dx, dy + 80, touch, touch ],
 								busy || state.quantity <= 1
 							);

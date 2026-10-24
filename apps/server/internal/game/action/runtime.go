@@ -264,6 +264,7 @@ type Runtime struct {
 	petSessions map[petOwnerKey]*petSession
 	petShields  petShieldStore
 	wolfHowls   wolfHowlStore
+	tailwinds   tailwindStore
 
 	// Admission precedes game-ready/pet binding; teardown follows this owner.
 	characterAdmissions sync.Map // simulation.WorldKey -> populationAdmission
