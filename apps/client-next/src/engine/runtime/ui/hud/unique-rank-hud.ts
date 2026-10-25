@@ -15,7 +15,8 @@ reopened it after every teleport.
 
 ===========================================================================
 */
-import type { GameplayState, UniqueDamageRank } from "@/engine/contracts/gameplay";
+import type { GameplayState } from "@/engine/contracts/gameplay";
+import type { UniqueDamageRank } from "@/engine/contracts/unique-rank";
 
 /*
 ================

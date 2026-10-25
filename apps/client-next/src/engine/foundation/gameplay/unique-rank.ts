@@ -10,7 +10,7 @@ SRO_UNIQUE_DAMAGE_RANK on.
 
 ===========================================================================
 */
-import type { UniqueDamageRank } from "@/engine/contracts/gameplay";
+import type { UniqueDamageRank } from "@/engine/contracts/unique-rank";
 
 // The ranked rows the server sends (wire.UniqueDamageRankMaxRows).
 export const UNIQUE_RANK_ROWS = 12;

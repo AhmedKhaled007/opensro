@@ -15,7 +15,7 @@ u16 selfRank, u32 selfDamage, u8 selfPartyRank.
 ===========================================================================
 */
 import type { WireFrame } from "@/engine/contracts/network";
-import type { UniqueDamageRank, UniqueDamageRow } from "@/engine/contracts/gameplay";
+import type { UniqueDamageRank, UniqueDamageRow } from "@/engine/contracts/unique-rank";
 
 export const OP_UNIQUE_DAMAGE_RANK = 0x3fbc;
 const MAX_ROWS = 12;
