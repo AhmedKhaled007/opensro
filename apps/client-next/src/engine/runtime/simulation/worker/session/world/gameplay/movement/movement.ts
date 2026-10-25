@@ -38,7 +38,12 @@ import {
 	movementDuration
 } from "@/engine/foundation/gameplay/native-movement";
 import { createNavigation } from "@/engine/foundation/navigation/clipper";
-import { stepWalk, WALK_NAVIGATION_REJECT, WALK_NAVIGATION_STOP } from "@/engine/foundation/gameplay/walk-step";
+import {
+	stepWalk,
+	walkLeg,
+	WALK_NAVIGATION_REJECT,
+	WALK_NAVIGATION_STOP
+} from "@/engine/foundation/gameplay/walk-step";
 import { minimapPoseKey } from "@/engine/foundation/gameplay/minimap-floor-key";
 import { admitPose, decodeMovementReceipt, receiptWorld } from "@/engine/foundation/gameplay/movement-wire";
 import type { Pose } from "@/engine/contracts/gameplay";
@@ -609,6 +614,24 @@ it: it never left the start, so walk back there.
 	}
 	/*
 ================
+settlePrediction
+
+End an open prediction where the walker stands. The walk it predicted did
+run, but it is over and the server will send no walk of its own: a chase
+whose target died or left mid-leg, where the server halts the caster
+wherever its follow had carried it. There is no start to walk back to (that
+is endPrediction); the next server walk reconciles from here.
+================
+	*/
+	function settlePrediction( now: number ) {
+		if ( !predicted || !pose ) return;
+		advanceTo( now );
+		predicted = null;
+		beginTransition( "cast" );
+		segment = null;
+	}
+	/*
+================
 bindOwners
 ================
 	*/
@@ -660,6 +683,18 @@ The separate presentation corridor bounds cosmetic extrapolation.
 		} );
 	}
 
+	/*
+================
+movementAim
+
+The published aim of the walk in progress (state).
+================
+	*/
+	function movementAim(): import("@/engine/contracts/gameplay").MovementAim | undefined {
+		if ( !segment || segment.fixedTiming ) return undefined;
+		if ( !segment.direction ) return { kind: "goal", destination: { ...segment.to } };
+		return segment.direction.blocked ? undefined : { kind: "direction", heading: segment.direction.heading };
+	}
 	/*
 ================
 referenceAt
@@ -1016,6 +1051,50 @@ heading
 		},
 		/*
 ================
+steer
+
+The arrow keys' turn (arrow-keys.ts, 0x86D480): a direction walk under way
+takes the new heading from the live pose, as driftWalk re-aims it; a
+standing character turns where it stands.
+================
+		*/
+		steer( angle: number, now: number ) {
+			if ( !Number.isInteger( angle ) || angle < 0 || angle > 65535 ) throw new Error( "Invalid heading" );
+			advanceTo( now );
+			if ( !walk || !segment?.direction || segment.direction.blocked || !pose ) {
+				if ( pose ) pose = { ...pose, angle };
+				if ( authoritative ) authoritative = { ...authoritative, angle };
+				return;
+			}
+			walk.heading = angle;
+			// The server turns its walker only when a steer arrives (every
+			// eighth of a turn), so its line no longer predicts this walk: drop
+			// the drift reference rather than pull the turn back onto it.
+			walk.reference = null;
+			owner = liveOwner( now );
+			pose = navigation.surface( pose, pose, owner, surfaceCursor );
+			poseAtMs = now;
+			segment = directionSegment( pose, angle, now, segment.lead, walk.factor );
+		},
+		/*
+================
+stopDirection
+
+The Up arrow's release (0x72F5, arrow-keys.ts): the direction walk ends
+where the walker is now. The server stops its own walker when the stop
+arrives and corrects to that point (0xB2F5).
+================
+		*/
+		stopDirection( now: number ) {
+			advanceTo( now );
+			if ( !segment?.direction ) return;
+			beginTransition( "input" );
+			authoritative = pose;
+			segment = null;
+			walk = null;
+		},
+		/*
+================
 mode
 ================
 		*/
@@ -1343,12 +1422,9 @@ request
 			predicted = null;
 			if ( clipped ) {
 				segment = {
-					from: pose,
-					to: { ...clipped, angle: movementHeading( pose, clipped ) },
-					start: now,
+					...walkLeg( pose, clipped, now, speed ),
 					timing: "speed",
 					lead: "client",
-					duration: movementDuration( poseDistance( pose, clipped ), speed ),
 					owners: query.owners,
 					admitted: true,
 					history: incomingHistory
@@ -1401,6 +1477,44 @@ walk (native); a refusal ends it (endPrediction).
 		},
 		/*
 ================
+retargetPrediction
+
+Re-aim an open prediction at a new goal: the leg rebuilds from the live
+pose while the prediction keeps its start pose and its clock, so the
+server walk still adopts it (native) and the unanswered walk-back still
+times from the original request. The chase re-aims this way while its
+target moves, as the server's follow does. Refused off navigation
+coverage, like predictApproach; the caller then keeps the old leg.
+================
+		*/
+		retargetPrediction( value: Pose, now: number ): boolean {
+			if ( !pose || life === "dead" || walk || pending.size || !predicted ) return false;
+			advanceTo( now );
+			const current = pose,
+				to = admitPose( value ),
+				query: { slide: boolean; sourceOwner?: NavOwner; owners?: readonly NavOwnerSpan[]; } = {
+					slide: false,
+					sourceOwner: owner
+				};
+			const clipped = navigation.available( current ) ? to : null;
+			if ( !clipped || poseDistance( clipped, to ) >= ENDPOINT_EPSILON ) return false;
+			beginTransition( "input" );
+			predicted = { ...predicted, to };
+			pose = current;
+			segment = {
+				from: current,
+				to: { ...clipped, angle: movementHeading( current, clipped ) },
+				start: now,
+				timing: "speed",
+				lead: "client",
+				duration: movementDuration( poseDistance( current, clipped ), speed ),
+				owners: query.owners,
+				admitted: true
+			};
+			return true;
+		},
+		/*
+================
 endPrediction
 
 The server refused the walk it was predicted to drive: it never left the
@@ -1409,6 +1523,14 @@ start, so walk back there.
 		*/
 		endPrediction( now: number ) {
 			endPrediction( now );
+		},
+		/*
+================
+settlePrediction
+================
+		*/
+		settlePrediction( now: number ) {
+			settlePrediction( now );
 		},
 		/*
 ================
@@ -1773,6 +1895,12 @@ state
 				movementPath: presentationPath(),
 				movementRevision,
 				movementInputSeq: inputSeq,
+				movementSpeed: speed,
+				// The walk the main-thread mover can rebuild (#1441b, #1563): a goal
+				// walk's destination or a direction walk's live heading; undefined
+				// for a blocked leg, a skill displacement or no walk.
+				movementAim: movementAim(),
+				movementSpeedFactor: segment?.direction && walk ? walk.factor : 1,
 				movementTransition: { ...transition, pathEligible: segment?.admitted === true },
 				movementDiagnostics: { total: reanchorReports, recent: recentReanchors.slice() },
 				navigationFloor: navigation.floor( pose, owner ),
