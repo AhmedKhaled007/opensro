@@ -106,8 +106,8 @@ export interface ExperimentalOptions {
 	readonly plusSevenNotices: boolean;
 	// Port-only, not native: when a unique the player damaged dies, the
 	// shard's damage ranking (0x3FBC, server SRO_UNIQUE_DAMAGE_RANK) opens
-	// in a window (unique-rank-hud.ts). Off unless turned on (the owner's
-	// choice, 2026-10-24), so each player opts in.
+	// in a window (unique-rank-hud.ts). Off unless turned on, so each
+	// player opts in.
 	readonly uniqueDamageRank: boolean;
 	// Port-only, not native: holding V (UIIT_STT_USER_MOSTER_BLIND) also
 	// hides other players' pets and transports. The original hides only

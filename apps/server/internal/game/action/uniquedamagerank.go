@@ -3,7 +3,7 @@
 
 uniquedamagerank.go - the damage ranking shown when a unique dies
 
-Port-only, not native (owner decision 2026-10-23). The original announces
+Port-only, not native, and off by default. The original announces
 only a unique's killer (0x3058 kind 6). With SRO_UNIQUE_DAMAGE_RANK on,
 every player who damaged the unique also receives the port-only 0x3FBC
 frame (wire/uniquedamagerank.go): the twelve players who did the most

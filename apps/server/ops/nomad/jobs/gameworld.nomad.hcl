@@ -217,11 +217,11 @@ variable "fast_den_return" {
 }
 
 # unique_damage_rank shows everyone who damaged a unique the twelve players
-# who did the most damage when it dies (port-only, not native; owner
-# decision 2026-10-23). "off" restores the native killer notice alone.
+# who did the most damage when it dies (port-only, not native). "off", the
+# default, keeps the native killer notice alone.
 variable "unique_damage_rank" {
   type    = string
-  default = "on"
+  default = "off"
 }
 
 # closed_object_rescue moves a character that logs in inside a closed object

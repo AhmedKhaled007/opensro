@@ -58,7 +58,7 @@ const OFF = Object.freeze( {
 	dropPlusNotices: true,
 	// On by default (owner 2026-10-19): the shard's +7 notices show.
 	plusSevenNotices: true,
-	// Off by default (owner 2026-10-24): each player opts in to the unique damage ranking.
+	// Off by default: each player opts in to the unique damage ranking.
 	uniqueDamageRank: false,
 	// Off by default: V hides only monsters and players, as the original does.
 	vHidesCompanions: false,

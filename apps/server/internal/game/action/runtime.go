@@ -385,8 +385,8 @@ type Runtime struct {
 	DenNoTransportSummon bool
 
 	// UniqueDamageRank shows a unique's damage ranking to everyone who
-	// damaged it (uniquedamagerank.go; port-only, not native; owner
-	// 2026-10-23). False is native.
+	// damaged it (uniquedamagerank.go; port-only, not native). False, the
+	// default, is native.
 	UniqueDamageRank bool
 
 	// Announce selects the port-only shard notices (announce.go); the zero

@@ -312,7 +312,7 @@ func publicRules() publicstats.RulesResponse {
 			{Flag: action.EnvUniqueDamageRank, On: action.UniqueDamageRankFromEnv(),
 				Native: "When a unique dies, the shard is told only who killed it.",
 				Now:    "Everyone who damaged it also sees the twelve players who did the most damage, with each one's share and party place, and their own place.",
-				Why:    "Owner-approved for the beta, so every attacker sees what their part was; the original notice alone returns with one setting."},
+				Why:    "So every attacker sees what their part was. Off by default; the original notice alone is the native setting."},
 			{Flag: movement.EnvClosedObjectRescue, On: movement.ClosedObjectRescueFromEnv(),
 				Native: "A character that logs in inside a tree trunk or a rock stays there and cannot walk out.",
 				Now:    "Logging in inside one moves the character to the nearest open ground.",
