@@ -6,7 +6,10 @@ world.ts - transport admission, reconnect and departure for one world session
 The network deadline covers tickets, references and native synchronization.
 It is a stall deadline (#1010): arriving frames and reference bytes extend
 it by its window, and only a full window of silence fails the attempt, so a
-slow link that keeps delivering enters however long that takes.
+slow link that keeps delivering enters. Progress extends the deadline only
+up to a bounded ceiling from the arm (DEADLINE_MAX_WINDOWS windows): a peer
+that proves the wire with keepalive pings while building nothing is wedged,
+not slow, and must still fail into the timeout path (#1471 review).
 The presentation acknowledgement is a separate barrier: it gates commands,
 never retries a successfully received world.
 A transient failure before the world binds retries the admission inside
@@ -34,6 +37,11 @@ import {
 } from "@/engine/contracts/network";
 const ADMISSION_TIMEOUT_MS = 10000;
 const REFERENCE_TIMEOUT_MS = 30000;
+// Progress may slide a deadline this many windows past its arm, no further:
+// eighteen admission windows is three minutes (nine for references), long
+// enough never to cut a healthy slow entry, finite enough that a wedged
+// one still times out and retries instead of loading forever.
+const DEADLINE_MAX_WINDOWS = 18;
 const RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 4000;
 // A request waiting this long with no frame of any kind arriving since it
@@ -206,14 +214,21 @@ onNetworkFailure
 		error: string;
 	} = { kind: "idle" };
 	let lastError: string | undefined;
-	// When the last frame of any kind arrived (step clock), and when the
-	// current stall was first seen.
-	let lastInboundAtMs = -Infinity, lastReceived = 0;
+	// The stall watch: the oldest outstanding request's send time (step
+	// clock), the event-clock moment that request was first seen
+	// outstanding, and when the current stall was first seen. The world
+	// keeps no last-inbound time of its own (#1474): a frame proves the
+	// link alive after a request only on the network's clock, never by
+	// the step that happened to sample it, so a frozen tab's backlog is
+	// not dated fresh.
+	let stallSince: number | undefined, stallBaseAt = -Infinity;
 	let stallSeenAtMs: number | undefined;
 	let huntingGuide: import("@/engine/contracts/hunting-guide").HuntingGuideSource | undefined;
 	let now = 0,
 		deadline = 0,
 		deadlineWindow = 0,
+		deadlineCeiling = 0,
+		inboundSeen = 0,
 		retryAt = 0,
 		attempt = 0,
 		reconnectSince = 0,
@@ -235,35 +250,43 @@ armDeadline
 
 Arm the admission deadline as a stall window of windowMs: noteProgress
 extends it, and only a full window without progress fails the attempt.
+The arm also fixes the progress ceiling: progress may slide the deadline
+at most DEADLINE_MAX_WINDOWS windows past this moment, never indefinitely.
 ================
 	*/
 	function armDeadline( windowMs: number ) {
 		deadlineWindow = windowMs;
 		deadline = now + windowMs;
+		deadlineCeiling = now + windowMs * DEADLINE_MAX_WINDOWS;
 	}
 	/*
 ================
 noteProgress
 
 A frame on the socket or a chunk of the reference body proves the link is
-still delivering; push the armed deadline out by its window. A cleared
-deadline stays cleared (the presentation barrier owns that wait).
+still delivering; push the armed deadline out by its window, but never past
+the ceiling its arm fixed. A keepalive-only wire therefore still times out
+once the ceiling passes. A cleared deadline stays cleared (the presentation
+barrier owns that wait).
 ================
 	*/
 	function noteProgress() {
-		if ( deadline ) deadline = now + deadlineWindow;
+		if ( deadline ) deadline = Math.min( now + deadlineWindow, deadlineCeiling );
 	}
 	/*
 ================
 inboundAge
 
-How long ago the last frame arrived, for the lost-answer incidents.
+How long ago the last frame arrived, for the lost-answer incidents: the
+network owner's event-clock stamp (receivedAt), so this age and the
+close detail's silence are the same number in two units (#1474).
 ================
 	*/
 	function inboundAge(): string {
-		return lastInboundAtMs === -Infinity ?
-			"no frame received yet" :
-			`last inbound ${Math.round( now - lastInboundAtMs )} ms ago`;
+		const at = network.receivedAt();
+		return Number.isFinite( at ) ?
+			`last inbound ${Math.max( 0, Math.round( performance.now() - at ) )} ms ago` :
+			"no frame received yet";
 	}
 	/*
 ================
@@ -276,8 +299,22 @@ Resume now (the lost-answer path), naming the link instead of the request.
 	*/
 	function stepStall() {
 		const since = core.outstandingSince();
-		// Alive only if a frame arrived after the request left.
-		if ( since === undefined || now - since < TRANSPORT_STALL_MS || lastInboundAtMs > since ) {
+		if ( since === undefined ) {
+			stallSince = undefined;
+			stallSeenAtMs = undefined;
+			return;
+		}
+		// A newly oldest request bases its watch now, on the event clock:
+		// frames already delivered (entry's setup frames, a frozen tab's
+		// backlog, one landing in the request's own step) left before it
+		// did, however late a step notices them (#1460, #1474).
+		if ( stallSince !== since ) {
+			stallSince = since;
+			stallBaseAt = performance.now();
+		}
+		// Alive only if a frame arrived after the request left (strictly,
+		// on the network's event clock).
+		if ( now - since < TRANSPORT_STALL_MS || network.receivedAt() > stallBaseAt ) {
 			stallSeenAtMs = undefined;
 			return;
 		}
@@ -561,7 +598,11 @@ takeDeparture
 command
 ================
 		*/
-		command( command: GameplayCommand, at = now ) {
+		command( command: GameplayCommand, at = now, inputSeq?: number ) {
+			// Record the input as taken before any gate below can drop it
+			// (#1441a): a click refused while loading or reconnecting is still
+			// an input the main thread must not replay.
+			if ( inputSeq !== undefined ) core.noteInput( inputSeq );
 			if ( phase !== "world" || (!ready && command.kind !== "navigation") ) {
 				throw new Error( "World gameplay is not ready" );
 			}
@@ -638,13 +679,6 @@ step
 			// A command may already have advanced this clock while an overdue
 			// fixed tick was queued. Catch-up must never rewind that command.
 			now = Math.max( now, time );
-			// network.ts answers pings and pongs itself; its frame count sees
-			// them. Sampled every step so a frame is dated to the step it came in.
-			const received = network.received();
-			if ( received !== lastReceived ) {
-				lastReceived = received;
-				lastInboundAtMs = now;
-			}
 			if ( disposed ) {
 				return;
 			}
@@ -701,6 +735,18 @@ step
 				references = { kind: "idle" };
 			}
 			if ( !failure ) network.drain( receive );
+			// Transport liveness is progress too. A loading scene is silent by
+			// design (the server is building its entry), so the server pings it
+			// on the keepalive's loading cadence and the network owner answers
+			// without surfacing a frame: the only sign here is the inbound
+			// count moving. A wire that still answers is not stalled, and its
+			// pings slide the window - up to the arm's ceiling, past which the
+			// entry is wedged, not slow, and fails the attempt (#1417, #1471).
+			const activity = network.received();
+			if ( activity !== inboundSeen ) {
+				inboundSeen = activity;
+				noteProgress();
+			}
 			const nextPing = !failure && phase === "world" ? network.pingMs() : null;
 			if ( nextPing !== pingMs ) {
 				pingMs = nextPing;
