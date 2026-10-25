@@ -3,23 +3,27 @@
 
 teleportprotection.go - the untouchable grace after a teleport arrival
 
-A successful return or reverse return scroll, gate or server relocation
-arrives untouchable: body mode 2, the revival's state, for the revival's
-grace (6.0 s, 11.0 in a siege world; spawnprotection.go). Monsters skip the
-player as a target (540DE0) and the player cannot attack (5291D0, 0x3020).
+Port-only, not native, behind SRO_TELEPORT_GRACE (off is native; owner
+decision 2026-10-25). With the switch on, a successful return or reverse
+return scroll, gate or server relocation arrives untouchable: body mode
+2, the revival's state, for the revival's grace (6.0 s, 11.0 in a siege
+world; spawnprotection.go). Monsters skip the player as a target and the
+player cannot attack, exactly as after a revival.
 
-Inference, stated here because SR_GameServer's teleport arm is not read:
-the original has an untouchable grace after a teleport (owner, from play on
-the original, 2026-10-24). The v1.150 client carries the state's notice for
-refusal code 32 (68A0A0, UIIT_MSG_SKILL_USE_FAIL_CANT_ATTACK_TEMPORARILY,
-"Cannot attack or be attacked for 5 seconds during untouchable status") and
-never grants the state itself, so the server granted it. No binary read
-here passes the notice's 5 seconds; the grace reuses the revival's.
+Native evidence (the #1518 re-verify at assembly level): the original
+grants this body mode after an arrival only on the revival family. The
+town-teleport routine schedules it when its caller asks for the grant,
+which revival and the timed-event return do and the GM move does not.
+Scrolls and gates set the separate teleport-mode state instead, and no
+other arrival path grants body mode 2. The v1.150 client never grants the
+state itself; it shows the server's refusal code 32 notice (68A0A0). The
+timed-event return's native grace is #1582, not this switch.
 
-The grace starts at the arrival's game-ready, not at the travel commit. A
-loading session is outside the tick, so nothing can reach it there, and a
-browser client's load can outlast the whole grace. The arrival only marks
-the character; ReconcileScene grants the body mode once the scene is live.
+The grace starts at the arrival's game-ready, not at the travel commit, a
+port adaptation: a loading session is outside the tick, so nothing can
+reach it there, and a browser client's load can outlast the whole grace.
+The arrival only marks the character; ReconcileScene grants the body mode
+once the scene is live.
 
 ===========================================================================
 */
@@ -27,10 +31,29 @@ the character; ReconcileScene grants the body mode once the scene is live.
 package action
 
 import (
+	"os"
+	"strings"
+
 	"opensro.online/server/internal/game/enterworld"
 	"opensro.online/server/internal/game/item/wire"
 	"opensro.online/server/internal/game/world/simulation"
 )
+
+// EnvTeleportGrace turns the post-teleport grace on ("on", "1", "true").
+const EnvTeleportGrace = "SRO_TELEPORT_GRACE"
+
+/*
+================
+TeleportGraceFromEnv
+================
+*/
+func TeleportGraceFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvTeleportGrace))) {
+	case "on", "1", "true":
+		return true
+	}
+	return false
+}
 
 /*
 ================
@@ -42,6 +65,9 @@ leaves one mark, so one grace follows the scene that finally goes live.
 ================
 */
 func (rt *Runtime) noteTeleportArrival(division string, c *enterworld.Character) {
+	if !rt.TeleportGrace {
+		return
+	}
 	rt.teleportArrivals.Store(simulation.WorldKey(division, c.Name), struct{}{})
 }
 

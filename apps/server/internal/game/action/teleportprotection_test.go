@@ -83,6 +83,7 @@ func TestTeleportProtectionStartsAtGameReady(t *testing.T) {
 		for _, rejected := range []bool{false, true} {
 			t.Run(path+map[bool]string{false: "/success", true: "/rollback"}[rejected], func(t *testing.T) {
 				rt, c, clock := reverseReturnFixture(t)
+				rt.TeleportGrace = true
 				if rejected {
 					rt.deps = portalRejectEntry{rt.deps}
 				}
@@ -135,6 +136,7 @@ A player who leaves while loading carries no mark into the next login.
 */
 func TestTeleportProtectionMarkEndsWithTheSession(t *testing.T) {
 	rt, c, clock := reverseReturnFixture(t)
+	rt.TeleportGrace = true
 	rt.PushCharacterFrames = func(string, string, []wire.Frame) {}
 	teleportTravel(t, rt, c, clock, "gate")
 	rt.ForgetCharacter(testDivision, c.Name)
@@ -153,11 +155,46 @@ A GM invincible or invisible mode is the stronger state and stays.
 */
 func TestTeleportProtectionKeepsGMStatus(t *testing.T) {
 	rt, c, clock := reverseReturnFixture(t)
+	rt.TeleportGrace = true
 	rt.PushCharacterFrames = func(string, string, []wire.Frame) {}
 	teleportTravel(t, rt, c, clock, "gate")
 	c.NativeBodyStatus = 3
 	gameReady(rt, c)
 	if c.NativeBodyStatus != 3 {
 		t.Fatalf("body status %d, want the GM's 3", c.NativeBodyStatus)
+	}
+}
+
+/*
+================
+TestTeleportProtectionIsOffByDefault
+
+With SRO_TELEPORT_GRACE unset (native), no travel path marks an arrival
+and game-ready grants nothing.
+================
+*/
+func TestTeleportProtectionIsOffByDefault(t *testing.T) {
+	t.Setenv(EnvTeleportGrace, "")
+	if TeleportGraceFromEnv() {
+		t.Fatal("the grace is on with the switch unset")
+	}
+	for _, path := range []string{"gate", "relocation", "return", "reverse"} {
+		t.Run(path, func(t *testing.T) {
+			rt, c, clock := reverseReturnFixture(t)
+			rt.TeleportGrace = TeleportGraceFromEnv()
+			rt.PushCharacterFrames = func(string, string, []wire.Frame) {}
+			rt.PushDivisionPeerFrames = func(string, string, []wire.Frame) {}
+			teleportTravel(t, rt, c, clock, path)
+			gameReady(rt, c)
+			if c.NativeBodyStatus != 0 {
+				t.Fatalf("native default granted body status %d", c.NativeBodyStatus)
+			}
+		})
+	}
+	for _, on := range []string{"on", "1", "TRUE"} {
+		t.Setenv(EnvTeleportGrace, on)
+		if !TeleportGraceFromEnv() {
+			t.Fatalf("%q did not turn the grace on", on)
+		}
 	}
 }

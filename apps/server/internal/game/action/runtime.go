@@ -425,6 +425,9 @@ type Runtime struct {
 	// TradeTiers rates caravans by cargo gold and raises Jangan route profit
 	// (tradetiers.go; port-only, not native). False is native.
 	TradeTiers bool
+	// TeleportGrace makes a teleport arrival untouchable for the revival's
+	// grace (teleportprotection.go; port-only, not native). False is native.
+	TeleportGrace bool
 	// tradeOrigins is each trade good's home town, from the shops.
 	tradeOrigins map[uint32]tradeTown
 
