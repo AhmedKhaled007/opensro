@@ -1223,7 +1223,8 @@ export function createUi(
 	================
 	*/
 	const takeLoadingVariant = () => {
-		const variant = nextLoadingVariant;
+		// Port-only, not native: the saved preference filters this load's artwork.
+		const variant = experimental.state().saved.safeLoadingScreen ? 1 : nextLoadingVariant;
 		nextLoadingVariant = loadingVariant();
 		return variant;
 	};
@@ -25815,7 +25816,7 @@ export function createUi(
 				inWorld: phase === "world",
 				dead: !!game?.vitals.find( v => v.gid === game.localGid )?.deathState,
 				leaving: leaveRequested,
-				nextVariant: nextLoadingVariant
+				nextVariant: experimental.state().saved.safeLoadingScreen ? 1 : nextLoadingVariant
 			} ) );
 			// Prewarm decoded authored artwork so hotkeys/sidebar changes stay immediate.
 			// Renderer now derives GPU residency from committed quads; this catalogue
