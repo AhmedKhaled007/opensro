@@ -4781,6 +4781,9 @@ before take assembles the presentation snapshot.
 		step( now: number, local?: EntityState ) {
 			inventorySince = inventory.state().inventoryPending ? inventorySince ?? now : undefined;
 			arrowKeys.step( now, arrowMover( local ) );
+			// A turn changes the facing every tick, walking or standing: publish
+			// it (a standing turn moves nothing else that would).
+			if ( arrowKeys.rate() ) dirty = true;
 			// A gate can open or close with no command or frame (a cast's action
 			// window ends): republish when the answer changes.
 			const refusal = groundWalkRefusal( now, local );
@@ -5180,6 +5183,7 @@ The published plane when something changed since the last take, else null.
 				revision: ++revision,
 				localGid,
 				...m,
+				movementTurnRate: arrowKeys.rate(),
 				walkPredictable,
 				walkHeld,
 				moveHeld: moveReservation.holding(),
