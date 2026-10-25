@@ -9641,14 +9641,12 @@ export function createUi(
 				let statusBottom = targetBottom;
 				shown.forEach( ( record, i ) => {
 					const cls = cosClass( record.band )!, chrome = cosStatusChrome( cls );
+					// The server's pool, whatever the display row (#1548): it publishes
+					// training and spirit only while the expansion is on.
 					const reference = petReference(
 						data.cosReferences.get( record.refObjId ),
-						experimental.state().saved.attackPetTraining && game?.petTraining?.gid === record.gid ?
-							game.petTraining :
-							undefined,
-						experimental.state().saved.attackPetTraining ?
-							next.entities.find( e => e.gid === record.gid )?.petResolve :
-							undefined,
+						game?.petTraining?.gid === record.gid ? game.petTraining : undefined,
+						next.entities.find( e => e.gid === record.gid )?.petResolve,
 						next.simulationTimeMs ?? 0
 					);
 					const nativeRect = cosStatusRect( w, i, cls, cosStatusDesktopTop() );
@@ -11205,8 +11203,8 @@ export function createUi(
 					petMiniInfo(
 						game.cosRecords,
 						hudData.cosReferences,
-						experimental.state().saved.attackPetTraining ? game.petTraining : undefined,
-						experimental.state().saved.attackPetTraining && attackCosGid !== undefined ?
+						game.petTraining,
+						attackCosGid !== undefined ?
 							next.entities.find( e => e.gid === attackCosGid )?.petResolve :
 							undefined,
 						next.simulationTimeMs ?? 0
@@ -11772,10 +11770,8 @@ export function createUi(
 						(target.kind === "cos" ?
 							petReference(
 								hudData.cosReferences.get( target.refObjId ),
-								experimental.state().saved.attackPetTraining && game?.petTraining?.gid === target.gid ?
-									game.petTraining :
-									undefined,
-								experimental.state().saved.attackPetTraining ? target.petResolve : undefined,
+								game?.petTraining?.gid === target.gid ? game.petTraining : undefined,
+								target.petResolve,
 								next.simulationTimeMs ?? 0
 							)?.maxHp :
 							undefined);
@@ -17356,16 +17352,16 @@ export function createUi(
 							}
 						}
 					} else if ( cosTab === 0 && record ) {
-						const trainingState =
-							experimental.state().saved.attackPetTraining && game?.petTraining?.gid === record.gid ?
-								game.petTraining :
-								undefined;
+						// Every number is the server's (#1548): the published training
+						// whatever the row; the row gates only the training UI.
+						const publishedTraining = game?.petTraining?.gid === record.gid ? game.petTraining : undefined;
+						const trainingState = experimental.state().saved.attackPetTraining ?
+							publishedTraining :
+							undefined;
 						const reference = petReference(
 							hudData.cosReferences.get( record.refObjId ),
-							trainingState,
-							experimental.state().saved.attackPetTraining ?
-								next.entities.find( e => e.gid === record.gid )?.petResolve :
-								undefined,
+							publishedTraining,
+							next.entities.find( e => e.gid === record.gid )?.petResolve,
 							next.simulationTimeMs ?? 0
 						);
 						const node = ( id: number ) => Object.values( page ).find( n => n.id === id );
@@ -17466,7 +17462,7 @@ export function createUi(
 											return attack?.present ? attack : undefined;
 										} )
 									),
-									trainingState
+									publishedTraining
 								);
 								const values: [number, string][] = [
 									[ 66, String( ability.hit ) ],
@@ -20732,11 +20728,22 @@ export function createUi(
 							fontStyle: selected ? 2 : 0
 						} ).map( q => ({ ...q, characterAnchor: entity.gid }) )
 					);
+					const ownerEntity = next.entities.find( owner => owner.gid === entity.ownerGid );
+					// 854BB8: with no guild record the soldier's row keeps the
+					// owner's name colour, so the label colour is passed only
+					// when the owner actually has a guild (another player by
+					// its guild name, the local player through social.guild);
+					// overheadLayout's row colour alone is unconditional and
+					// would hand a guildless owner the default blue.
+					const ownerGuildName = ownerEntity?.gid === game?.localGid ?
+						game?.social?.guild?.name :
+						ownerEntity?.guildName;
 					const ownerPlate = entity.kind === "cos" ?
 						companionOwnerNameplate(
 							entity,
-							next.entities.find( owner => owner.gid === entity.ownerGid ),
-							options
+							ownerEntity,
+							options,
+							ownerGuildName && ownerEntity ? overheads.get( ownerEntity.gid )?.guildColor : undefined
 						) :
 						null;
 					if ( ownerPlate && height ) {
