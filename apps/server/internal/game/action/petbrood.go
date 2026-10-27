@@ -9,6 +9,7 @@ lanes own their targets, damage and rewards. No summon survives logout.
 package action
 
 import (
+	"encoding/binary"
 	"strings"
 
 	"opensro.online/server/internal/domain"
@@ -281,7 +282,9 @@ func (rt *Runtime) broodDeathStorm(key petOwnerKey, state *petSession, snapshot 
 		skill.ActionArea = enterworld.SkillOffensiveArea{}
 		if hit, committed := rt.strikePetTarget(step, target, skill); committed {
 			public := hit.strike.public
-			if current, found := rt.Monsters.Get(key.division, target.gid); found {
+			// A target with an abnormal state already got its HP in the strike's
+			// abnormal vitals frame (monsterImpactAbnormalFrames); send one refresh.
+			if current, found := rt.Monsters.Get(key.division, target.gid); found && !hasVitalsFrameFor(public, target.gid) {
 				public = append(public, wire.Frame{Opcode: simulation.OpVitalsUpdate, Payload: simulation.HPRefreshPayload(target.gid, 0, current.CurrentHP)})
 			}
 			// The dying clone cannot publish a normal cast result after despawning.
@@ -299,4 +302,21 @@ func (rt *Runtime) broodDeathStorm(key petOwnerKey, state *petSession, snapshot 
 			break
 		}
 	}
+}
+
+/*
+================
+hasVitalsFrameFor
+
+Reports whether frames already carry a vitals update for gid, so the death
+burst never publishes the target's HP twice.
+================
+*/
+func hasVitalsFrameFor(frames []wire.Frame, gid uint32) bool {
+	for _, frame := range frames {
+		if frame.Opcode == simulation.OpVitalsUpdate && len(frame.Payload) >= 4 && binary.LittleEndian.Uint32(frame.Payload) == gid {
+			return true
+		}
+	}
+	return false
 }
