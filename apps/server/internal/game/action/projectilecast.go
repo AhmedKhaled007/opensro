@@ -40,15 +40,36 @@ type pendingProjectileCast struct {
 	statusArea                bool        // untargeted; the release rolls a caster-centred status area
 	threatDecrease            bool        // untargeted; the release lowers hostility around the caster (mirage.go)
 	divisionID, characterName string
-	characterID               int64
-	cast                      wire.SkillAction
-	token                     uint32
-	rootID                    uint32
-	releaseAtMs               int64
+	// ownerKey is simulation.WorldKey(divisionID, characterName), computed
+	// once at prepare time; see pendingSkillFinalize.ownerKey (#1820 D).
+	ownerKey    string
+	characterID int64
+	cast        wire.SkillAction
+	token       uint32
+	rootID      uint32
+	releaseAtMs int64
 	// stealthStrike is command flag 0x10: issued in body mode 6.
 	// The release reads it, not the live body, which the cast's own event
 	// retirement has already ended.
 	stealthStrike bool
+}
+
+/*
+================
+newPendingProjectileCast
+
+newPendingProjectileCast starts one prepared cast for an owner. The
+cached ownerKey is derived here, from the division and character the
+caller names, so no literal at a prepare site can leave the key empty
+and strand the cast outside the tick's owner scans (#1820 D).
+================
+*/
+func newPendingProjectileCast(divisionID, characterName string) pendingProjectileCast {
+	return pendingProjectileCast{
+		divisionID:    divisionID,
+		characterName: characterName,
+		ownerKey:      simulation.WorldKey(divisionID, characterName),
+	}
 }
 
 /*
@@ -80,7 +101,14 @@ func (rt *Runtime) prepareSelfCast(division string, c *enterworld.Character, cas
 		return offensiveRefusal(0x3003)
 	}
 	charge := skillCharge{mp: cost, hp: rt.preparedExecutionHPCost(division, c, skill)}
-	p := pendingProjectileCast{executionCost: charge, supportCast: !effect, selfEffect: effect, divisionID: division, characterName: c.Name, characterID: c.ID, cast: cast, token: atomic.AddUint32(&rt.castTokenCounter, 1), releaseAtMs: now + int64(skill.ActionCastingTimeMs) + 1}
+	p := newPendingProjectileCast(division, c.Name)
+	p.executionCost = charge
+	p.supportCast = !effect
+	p.selfEffect = effect
+	p.characterID = c.ID
+	p.cast = cast
+	p.token = atomic.AddUint32(&rt.castTokenCounter, 1)
+	p.releaseAtMs = now + int64(skill.ActionCastingTimeMs) + 1
 	rt.pendingSkillFinalizesMu.Lock()
 	rt.pendingProjectileCasts = append(rt.pendingProjectileCasts, p)
 	rt.installCurrentSkillCommandLocked(division, c, p.token, skill)
@@ -100,9 +128,14 @@ func (rt *Runtime) prepareProjectileCast(division string, c *enterworld.Characte
 		return offensiveRefusal(0x3003)
 	}
 	charge := skillCharge{mp: cost, hp: rt.preparedExecutionHPCost(division, c, skill)}
-	pending := pendingProjectileCast{executionCost: charge, divisionID: division, characterName: c.Name, characterID: c.ID, cast: cast,
-		rootID: rootID, token: atomic.AddUint32(&rt.castTokenCounter, 1), releaseAtMs: now + int64(skill.ActionCastingTimeMs) + 1,
-		stealthStrike: c.NativeBodyStatus == 6}
+	pending := newPendingProjectileCast(division, c.Name)
+	pending.executionCost = charge
+	pending.characterID = c.ID
+	pending.cast = cast
+	pending.rootID = rootID
+	pending.token = atomic.AddUint32(&rt.castTokenCounter, 1)
+	pending.releaseAtMs = now + int64(skill.ActionCastingTimeMs) + 1
+	pending.stealthStrike = c.NativeBodyStatus == 6
 	rt.pendingSkillFinalizesMu.Lock()
 	rt.pendingProjectileCasts = append(rt.pendingProjectileCasts, pending)
 	rt.installCurrentSkillCommandLocked(division, c, pending.token, skill)
@@ -154,16 +187,17 @@ func (rt *Runtime) cancelPreparingProjectile(division, name string) []wire.Frame
 	rt.pendingSkillFinalizesMu.Lock()
 	defer rt.pendingSkillFinalizesMu.Unlock()
 	var frames []wire.Frame
+	ownerKey := simulation.WorldKey(division, name)
 	kept := rt.pendingProjectileCasts[:0]
 	for _, p := range rt.pendingProjectileCasts {
-		if simulation.WorldKey(p.divisionID, p.characterName) == simulation.WorldKey(division, name) {
+		if p.ownerKey == ownerKey {
 			frames = append(frames, wire.SkillCastFinalizeFrame(p.token))
 		} else {
 			kept = append(kept, p)
 		}
 	}
 	rt.pendingProjectileCasts = kept
-	delete(rt.currentSkillCommands, simulation.WorldKey(division, name))
+	delete(rt.currentSkillCommands, ownerKey)
 	return frames
 }
 
