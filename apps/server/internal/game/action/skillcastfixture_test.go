@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"opensro.online/server/internal/game/enterworld"
@@ -174,7 +175,7 @@ func buildSkillCastFixture(t *testing.T) skillCastFixture {
 	return skillCastFixture{
 		Comment: []string{
 			"GENERATED + PINNED by internal/game/action/skillcastfixture_test.go (TestSkillCastAcceptFixturePinned).",
-			"Authoritative v1.150 base attack evaluated by the pinned v1.188 CFormulae normal lane.",
+			"Authoritative v1.150 base attack evaluated by the pinned reference-server normal damage lane.",
 			"The real HandleTargetInteract path snapshots the player, derives equipped-item stats, resolves",
 			"the live monster, commits HP through MonsterState.ApplyDamage, and emits the committed result.",
 			"Immediate 0xB245 is [success prefix][steeringFlags=01][impact rows][target columns]; movement is not a facing hint.",
@@ -245,6 +246,11 @@ func TestSkillCastAcceptFixturePinned(t *testing.T) {
 	}
 	if pinned.Expect != fresh.Expect {
 		t.Errorf("expect block drifted:\n got %+v\nwant %+v", pinned.Expect, fresh.Expect)
+	}
+	// The comment is pinned too: a description edited on one side only
+	// would leave the generator and the fixture saying different things.
+	if !slices.Equal(pinned.Comment, fresh.Comment) {
+		t.Errorf("comment drifted:\n got %q\nwant %q", pinned.Comment, fresh.Comment)
 	}
 	if len(pinned.Scenarios) != len(fresh.Scenarios) {
 		t.Fatalf("fixture has %d scenarios, the accept path builds %d - regenerate", len(pinned.Scenarios), len(fresh.Scenarios))
