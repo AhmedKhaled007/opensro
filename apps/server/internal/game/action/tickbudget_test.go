@@ -49,10 +49,13 @@ const (
 // crow-brood and pet-spirit owner-copy admissions 1,131,000 B /
 // 2,962 allocs; with crow broods and a periodic COS pulse seeded into
 // the shard (a heavier workload, not a regression) 1,642,000 B /
-// 3,588 allocs.
+// 3,588 allocs; with the pet-periodic admissions (the pet tick, the
+// persistent-effect pulse, the crow recipient walk and the COS/monster
+// source capture) on that same seeded shard, measured 1,019,000 B /
+// 2,719 allocs.
 const (
-	tickBudgetBytesPerTick  = 1807000
-	tickBudgetAllocsPerTick = 3950
+	tickBudgetBytesPerTick  = 1121000
+	tickBudgetAllocsPerTick = 2991
 )
 
 /*
