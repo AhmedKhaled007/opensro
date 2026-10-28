@@ -68,6 +68,14 @@ type MonsterMoverOps struct {
 	// shownMonsters; nil until the first wake on this ops clone (ticker
 	// clones are made before any leg runs, so each owns its map).
 	resumePending map[populationKey]map[uint32]struct{}
+	// activityBlocks memoizes the activity gate's per-actor block
+	// resolution (monsteractivity.go); shard-owned like resumePending.
+	activityBlocks map[uint32]activityBlockMemo
+	// legSessions groups the running leg's sessions by division, built
+	// at the top of RunMonsterLeg and cleared when it returns, so the
+	// per-actor publish path iterates one division's viewers instead of
+	// rescanning every session. Nil outside a leg.
+	legSessions map[string][]SessionSnapshot
 	// Navigation counts route plans and path clips (navigation_metrics.go);
 	// nil counts nothing.
 	Navigation     *NavigationMetrics
@@ -360,12 +368,15 @@ func (ops *MonsterMoverOps) RunMonsterLeg(nowMs int64, sessions []SessionSnapsho
 
 	viewers := make(map[string]worldgeom.RegionXZ, len(sessions))
 	live := make(map[string]bool, len(sessions))
+	legSessions := make(map[string][]SessionSnapshot)
 	for _, session := range sessions {
 		live[session.SessionID] = true
 		pose := session.World.LiveSpawnAt(nowMs)
 		viewers[session.SessionID] = worldgeom.RegionXZ{RegionID: pose.RegionID, X: pose.X, Z: pose.Z}
-
+		legSessions[session.DivisionID] = append(legSessions[session.DivisionID], session)
 	}
+	ops.legSessions = legSessions
+	defer func() { ops.legSessions = nil }()
 
 	// Scope visibility FIRST, mover frames SECOND: a viewer must have
 	// received a monster's spawn before any 0xB738/0xB2F5 for its gid
@@ -460,29 +471,6 @@ func (ops *MonsterMoverOps) RunMonsterLeg(nowMs int64, sessions []SessionSnapsho
 	if stats.total >= SlowHookThreshold {
 		stats.logSlow(ops.divisionID)
 	}
-}
-
-/*
-================
-advanceAndPublish
-================
-*/
-func (ops *MonsterMoverOps) advanceAndPublish(divisionID string, instance monster.Instance, players []playerPose, nowMs int64, sessions []SessionSnapshot, push Pusher) {
-	// Part C times the advance itself, so the direct dispatch below and
-	// the RunAction closure path accumulate into the same figure.
-	if ops.leg != nil {
-		started := time.Now()
-		defer func() { ops.leg.noteAdvance(time.Since(started)) }()
-	}
-	frames, targeted := ops.advanceInstance(divisionID, instance, players, nowMs)
-	for _, session := range sessions {
-		if len(frames) > 0 && session.DivisionID == divisionID && ops.shownMonsters[session.SessionID][instance.Gid] {
-			push.PushToSession(session.SessionID, frames)
-		}
-	}
-	// Private consequences follow the public result in the same operation.
-	deliverMonsterTargetFrames(divisionID, targeted, sessions, push)
-	ops.vanishInSafeZone(divisionID, instance.Gid, nowMs)
 }
 
 /*
