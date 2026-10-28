@@ -149,37 +149,39 @@ func (s *Store) renameCharacterLocked(division string, selected *domain.Characte
 			ground[division][i].DroppedBy = after
 		}
 	}
-	tx, err := s.beginTxLocked()
+	tx, err := s.beginCharacterTxLocked()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, next := range updates {
-		if err := upsertCharacterTx(tx, division, &next); err != nil {
+		if err := tx.upsertCharacter(division, &next); err != nil {
 			return err
 		}
 	}
 	for id, members := range guilds {
-		if err := replaceGuildTx(tx, division, id, s.guilds[division][id], members); err != nil {
+		if err := replaceGuildTx(tx.Tx, division, id, s.guilds[division][id], members); err != nil {
 			return err
 		}
 	}
 	for id, letters := range mailboxes {
-		if err := replaceMailboxTx(tx, division, id, letters); err != nil {
+		if err := replaceMailboxTx(tx.Tx, division, id, letters); err != nil {
 			return err
 		}
 	}
-	if err := replaceGroundTx(tx, &s.encodeScratch, ground); err != nil {
+	if err := replaceGroundTx(tx.Tx, &s.encodeScratch, ground); err != nil {
 		return err
 	}
 	if reservation != nil {
-		if err := insertNameReservationTx(tx, *reservation); err != nil {
+		if err := insertNameReservationTx(tx.Tx, *reservation); err != nil {
 			return err
 		}
 	}
-	if err := upsertMetaTx(tx, metaKeyUpdatedAtMs, fmt.Sprint(s.now().UnixMilli())); err != nil {
+	if err := upsertMetaTx(tx.Tx, metaKeyUpdatedAtMs, fmt.Sprint(s.now().UnixMilli())); err != nil {
 		return err
 	}
+	// The transaction's Commit retains the renamed rows' digests
+	// (characterRowTx), so the next commit trusts exactly these bytes.
 	if err := tx.Commit(); err != nil {
 		return err
 	}
