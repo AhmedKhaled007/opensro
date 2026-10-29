@@ -3554,6 +3554,41 @@ test("party matching native form, local filters and owner approval are actionabl
 	}
 });
 
+test("the record form opens on its purpose's default title and a purpose change follows it", () => {
+	const f = uiFixture();
+	try {
+		f.state.gameplay.partyMatching = {
+			page: 0,
+			pages: 1,
+			rows: [],
+			own: null,
+			request: null,
+			pending: null,
+			result: null,
+			auto: []
+		};
+		f.state.gameplay.social = { localName: "Player", self: 1, leader: 0, options: 3, members: [] };
+		f.state.gameplay.progression = { level: 10, masteries: [] };
+		for ( let t = 0; t < 1600; t += 100 ) f.ui.step( f.state, t );
+		f.ui.event( { kind: "key", code: "KeyE" } );
+		f.ui.step( f.state, 1700 );
+		f.ui.event( { kind: "activate", id: "party-match:18" } );
+		let scene = f.ui.step( f.state, 1800 );
+		const title = () => scene.controls.find( c => c.id === "party-form-title" ).value;
+		// No job suit: purpose 0 (hunting), filled by 63BE00 when the form opens.
+		assert.equal( title(), "For open hunting on the Silk Road!" );
+		f.ui.event( { kind: "activate", id: "party-form-purpose:1" } );
+		scene = f.ui.step( f.state, 1900 );
+		assert.equal( title(), "When will the quests end on the Silk Road?", "the default follows the purpose" );
+		f.ui.event( { kind: "edit", id: "party-form-title", value: "Mine", start: 4, end: 4, composing: false } );
+		f.ui.event( { kind: "activate", id: "party-form-purpose:0" } );
+		scene = f.ui.step( f.state, 2000 );
+		assert.equal( title(), "Mine", "a typed title is never replaced" );
+	} finally {
+		f.dispose();
+	}
+});
+
 test("native party join progress owns input for ten seconds and uses the 200ms gauge clock", () => {
 	const sent = [], f = uiFixture( c => sent.push( c ) );
 	try {

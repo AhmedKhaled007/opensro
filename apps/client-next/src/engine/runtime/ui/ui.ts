@@ -491,6 +491,8 @@ import {
 	partyActiveJob,
 	partyPurposeAllowed,
 	partyDefaultPurpose,
+	partyFormTitle,
+	PARTY_TITLE_MAX_LENGTH,
 	type PartyListing
 } from "@/engine/foundation/gameplay/party-matching";
 import { NATIVE_LEVEL_CAP } from "@/engine/foundation/gameplay/level-cap";
@@ -4633,6 +4635,9 @@ export function createUi(
 					max: String( view.gameplay?.levelCap ?? NATIVE_LEVEL_CAP ),
 					title: ""
 				};
+			// 63BE00 runs once the job-based purpose is selected (63C20B /
+			// 63C2D8): the box opens on the purpose's default title.
+			partyForm.title = partyFormTitle( partyForm.title, partyForm.purpose, hud.data()?.strings ?? {} );
 		} else if ( id === "party-match:20" ) partyDialog = "delete";
 		else if ( id === "party-match:17" ) partyDialog = "auto";
 		else if ( id === "party-auto-stop" ) sendGameplay( { kind: "party-match-auto-stop" } );
@@ -4648,6 +4653,9 @@ export function createUi(
 			const purpose = Number( id.slice( 19 ) );
 			if ( partyPurposeAllowed( partyActiveJob( view.gameplay?.inventory ?? [] ), purpose ) ) {
 				partyForm.purpose = purpose;
+				// 63BE00 is also the radio's handler (data 0xBB6DE8): a default
+				// title follows the new purpose, a typed one stays.
+				partyForm.title = partyFormTitle( partyForm.title, purpose, hud.data()?.strings ?? {} );
 			}
 		} else if ( id === "party-form-confirm" ) {
 			if ( partyDialog === "delete" ) {
@@ -8624,7 +8632,7 @@ export function createUi(
 					}
 				} else if ( event.id.startsWith( "party-form-" ) ) {
 					const key = event.id.slice( 11 );
-					if ( key === "title" ) partyForm.title = event.value.slice( 0, 50 );
+					if ( key === "title" ) partyForm.title = event.value.slice( 0, PARTY_TITLE_MAX_LENGTH );
 					else if ( key === "min" || key === "max" ) {
 						partyForm[key] = event.value.replace( /[^0-9]/g, "" ).slice( 0, 3 );
 					}
@@ -22137,7 +22145,14 @@ export function createUi(
 							authoredLabeledButton( node, px, py, id, caption );
 						} else if ( node.type === "CIFEdit" ) {
 							const key = node.id === 49 ? "title" : node.id === 42 ? "min" : "max";
-							partyEdit( node, px, py, "party-form-" + key, partyForm[key], key === "title" ? 50 : 3 );
+							partyEdit(
+								node,
+								px,
+								py,
+								"party-form-" + key,
+								partyForm[key],
+								key === "title" ? PARTY_TITLE_MAX_LENGTH : 3
+							);
 						} else if ( automatic && node.type === "CIFRadioButton" ) {
 							const key = node.id === 35 ?
 									"purpose" :
