@@ -3057,10 +3057,72 @@ test("Character and Party use native main-popup art and share drag placement wit
 		f.ui.event( { kind: "activate", id: "party-settings" } );
 		for ( let i = 28; i < 35; i++ ) result = f.ui.step( f.state, i * 100 ) ?? result;
 		assert.ok( result.controls.some( c => c.id === "party-settings-ok" ) );
-		f.ui.event( { kind: "activate", id: "party-setting:1:1" } );
+		f.ui.event( { kind: "activate", id: "party-setting:1:0" } );
 		f.ui.event( { kind: "activate", id: "party-settings-cancel" } );
 		f.ui.step( f.state, 3600 );
 		assert.ok( !f.scenes.at( -1 ).quads.some( q => q.texture.endsWith( "/messagebox/msgbox_blackbox_03.png" ) ) );
+	} finally {
+		f.dispose();
+	}
+});
+
+test("party properties puts Auto Share above Distribution and OK keeps the chosen bits", () => {
+	const sent = [], f = uiFixture( c => sent.push( c.command ) );
+	// A target so the Party window's invite button sends the formation bits.
+	f.state.gameplay.target = 2;
+	const step = ( from, to ) => {
+		let result;
+		for ( let i = from; i < to; i++ ) result = f.ui.step( f.state, i * 100 ) ?? result;
+		return result;
+	};
+	const control = ( result, id ) => {
+		const found = result.controls.find( c => c.id === id );
+		assert.ok( found, "the dialog publishes " + id );
+		return found;
+	};
+	const openSettings = from => {
+		f.ui.event( { kind: "activate", id: "party-settings" } );
+		return step( from, from + 7 );
+	};
+	try {
+		f.ui.step( f.state, 0 );
+		f.ui.event( { kind: "activate", id: "open-window:Party" } );
+		step( 1, 8 );
+
+		let dialog = openSettings( 8 );
+		const expShare = control( dialog, "party-setting:1:0" ),
+			expSelf = control( dialog, "party-setting:1:1" ),
+			itemShare = control( dialog, "party-setting:2:0" ),
+			itemSelf = control( dialog, "party-setting:2:1" );
+		assert.equal( expShare.label, "Exp Auto Share", "row 0 is the EXP share option" );
+		assert.equal( expSelf.label, "Exp Distribution", "row 1 is the EXP self option" );
+		assert.equal( itemShare.label, "Item Auto Share", "row 0 is the item share option" );
+		assert.equal( itemSelf.label, "Item Distribution", "row 1 is the item self option" );
+		assert.ok( expShare.rect[1] < expSelf.rect[1], "the share radio is the top row" );
+		assert.ok( itemShare.rect[1] < itemSelf.rect[1], "the share radio is the top row" );
+		// Default formation is invitation only, so Distribution is the chosen row.
+		assert.equal( expShare.selected, false );
+		assert.equal( expSelf.selected, true );
+
+		// The top row selects the share bit; OK carries 1, 2 and the invitation bit.
+		f.ui.event( { kind: "activate", id: "party-setting:1:0" } );
+		f.ui.event( { kind: "activate", id: "party-setting:2:0" } );
+		dialog = step( 15, 17 );
+		assert.equal( control( dialog, "party-setting:1:0" ).selected, true );
+		assert.equal( control( dialog, "party-setting:1:1" ).selected, false );
+		f.ui.event( { kind: "activate", id: "party-settings-ok" } );
+		step( 17, 20 );
+		f.ui.event( { kind: "activate", id: "party-invite" } );
+		assert.equal( sent.pop().options, 7, "top rows set EXP and item share over the invitation bit" );
+
+		// The bottom row clears it again.
+		dialog = openSettings( 20 );
+		f.ui.event( { kind: "activate", id: "party-setting:1:1" } );
+		f.ui.event( { kind: "activate", id: "party-setting:2:1" } );
+		f.ui.event( { kind: "activate", id: "party-settings-ok" } );
+		step( 27, 30 );
+		f.ui.event( { kind: "activate", id: "party-invite" } );
+		assert.equal( sent.pop().options, 4, "bottom rows leave only the invitation bit" );
 	} finally {
 		f.dispose();
 	}

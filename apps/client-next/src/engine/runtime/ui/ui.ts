@@ -849,6 +849,9 @@ const FRAME = ROOT + "interface/frame/mframe_wnd_";
 const LETTER_CHILD_FRAME = ROOT + "interface/messagebox/msgbox2_window_";
 const PARTY_MATCH_RANGE_SEPARATOR_ID = 43;
 const PARTY_MATCH_VISIBLE_ROWS = 12;
+// The properties dialog (ifsetpartymode) lists Auto Share above Distribution
+// in both radio groups: row 0 sets the share bit, row 1 clears it.
+const PARTY_SETTING_ROW_SHARE = 0;
 // 63D500 tints all eight slot children (ids 10-17, the MARK icon included)
 // 0xFF87E9FF for the own listing. Port-only, not native: members get the tint
 // on their leader's listing too.
@@ -4350,9 +4353,10 @@ export function createUi(
 			partyOptions = partyDraft;
 			partySettings = false;
 		} else if ( id.startsWith( "party-setting:" ) ) {
-			const [bit, value] = id.slice( 14 ).split( ":" ).map( Number );
-			if ( bit === 1 || bit === 2 ) partyDraft = (partyDraft & ~bit) | (value ? bit : 0);
-			else if ( bit === 4 ) partyDraft ^= 4;
+			const [bit, row] = id.slice( 14 ).split( ":" ).map( Number );
+			if ( bit === 1 || bit === 2 ) {
+				partyDraft = (partyDraft & ~bit) | (row === PARTY_SETTING_ROW_SHARE ? bit : 0);
+			} else if ( bit === 4 ) partyDraft ^= 4;
 		} else if ( id.startsWith( "party-option:" ) ) partyOptions ^= Number( id.slice( 13 ) );
 		else if ( id.startsWith( "social-member:" ) ) {
 			socialMember = Number( id.slice( 14 ) );
@@ -14559,7 +14563,10 @@ export function createUi(
 								const bit = node.id === 13 ? 1 : node.id === 14 ? 2 : 4;
 								for ( let row = 0; row < (bit === 4 ? 1 : 2); row++ ) {
 									const r: UiRect = [ sx + node.rect[0], sy + node.rect[1] + row * 22, 16, 16 ],
-										on = bit === 4 ? !!(partyDraft & 4) : Number( !!(partyDraft & bit) ) === row,
+										shared = !!(partyDraft & bit),
+										on = bit === 4 ?
+											shared :
+											shared === (row === PARTY_SETTING_ROW_SHARE),
 										path = ROOT + "interface/ifcommon/com_radiobutton_" + (on ? "on" : "off") +
 											".png";
 									image( r, path );
@@ -14567,7 +14574,7 @@ export function createUi(
 										hudCopy( "UIIT_STT_PARTY_INVITATION_ANYONE" ) :
 										hudCopy(
 											"UIIT_STT_PARTY_" + (bit === 1 ? "EXP" : "ITEM") + "_" +
-												(row ? "SHARE" : "SELF")
+												(row === PARTY_SETTING_ROW_SHARE ? "SHARE" : "SELF")
 										);
 									controls.push( {
 										id: "party-setting:" + bit + ":" + row,
