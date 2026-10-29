@@ -21,6 +21,8 @@ import (
 	"opensro.online/server/internal/game/item/wire"
 	"opensro.online/server/internal/game/world/movement"
 	"opensro.online/server/internal/game/world/simulation"
+	"opensro.online/server/internal/testsupport/gamedatatest"
+	"opensro.online/server/internal/testsupport/licensed"
 	"opensro.online/server/internal/testsupport/wait"
 )
 
@@ -129,6 +131,40 @@ func TestReturnScrollCommitsConsumptionAndServerTimedReentry(t *testing.T) {
 				t.Fatal("completed twice")
 			}
 		})
+	}
+}
+
+/*
+================
+TestFreshCharacterReturnScrollLandsAtJanganGate
+
+A return scroll used before any town appointment lands at the race
+main-town gate's recall spawn (Jangan for a Chinese character), not the
+starter position.
+================
+*/
+func TestFreshCharacterReturnScrollLandsAtJanganGate(t *testing.T) {
+	licensed.RequireGameData(t)
+	rt, c, clock, _ := returnFixture(t, 5000)
+	if err := rt.ConfigurePortals(gamedatatest.TextdataDir(t)); err != nil {
+		t.Fatal(err)
+	}
+	id, ok := rt.portals.sources[janganTownGateRef]
+	if !ok {
+		t.Fatalf("catalogue lacks gate ref %d", janganTownGateRef)
+	}
+	want := rt.portals.destinations[id].spawn
+	var sent []wire.Frame
+	rt.PushCharacterFrames = func(_, _ string, f []wire.Frame) { sent = append(sent, f...) }
+	rt.PushDivisionPeerFrames = func(_, _ string, f []wire.Frame) {}
+	useReturn(rt, c)
+	clock.Advance(5000 * time.Millisecond)
+	rt.TickHook()(clock.NowMs())
+	if len(sent) == 0 || sent[0].Opcode != enterworld.OpcodeResetClient {
+		t.Fatalf("return scroll did not re-enter: %+v", sent)
+	}
+	if got := missionSpawnFromWorld(c.World.Spawn, simulation.Spawn{}); got != want {
+		t.Fatalf("return scroll landed at %+v, want the Jangan gate recall spawn %+v", got, want)
 	}
 }
 
